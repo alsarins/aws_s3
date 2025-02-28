@@ -15,7 +15,7 @@
 // 
 // 3) run script:
 // node nodejs_aws4.js
-
+//
 var https = require('https')
 var aws4  = require('aws4')
 
