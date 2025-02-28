@@ -1,3 +1,4 @@
-# aws s3
-
-Некоторые наработки по s3 проксированию с шифрованием. Также пример подписи AWS Signature V4 которую надо дбудет добавить в s3 proxy
+Modified https://github.com/abustany/s3proxy
+- added CONNECT method handler
+- added configurable AwsDomain
+- TODO: need solution for md5 checksum error with encryption enabled. etag is hex encoded, but client is waiting for MD5
