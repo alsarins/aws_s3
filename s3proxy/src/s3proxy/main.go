@@ -504,12 +504,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				originalEtag,
 			}
 
-			// TODO: Внимание, мои изменения ломают GET запросы, когда в листинге шифрованный объект. Нужно проверить
-			// а) как сохраняется метадата в UpdateObjectMetadata и какая именно
-			// b) как происходит расшифровка в h.PostRequestEncryptionHook
-			// проверить что все нормально работает, если в конфиге не указано шифрование
-			// нужен дебаг в metadata.go
-
+			// обновляем только метаданные объекта, без содержимого - см metadata.go
 			err = h.UpdateObjectMetadata(innerRequest.URL, metadata, r.Header, info)
 
 			if err != nil {
