@@ -3,7 +3,7 @@
 Modified https://github.com/abustany/s3proxy
 - added CONNECT method handler
 - added configurable AwsDomain
-- TODO: need solution for md5 checksum error with POST requests with payload and encryption enabled
+- TODO: need solution for aws signature error with POST requests with payload and encryption enabled
 - TODO: need to implement signature v4 instead of signature v2 (legacy) as of now
 
 # signature_v4
