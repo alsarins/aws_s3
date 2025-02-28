@@ -1,25 +1,34 @@
 #!/bin/bash
 
-# https://czak.pl/2015/09/15/s3-rest-api-with-curl
+# Example of elasticsearch DeleteMultipleObjects invocation, i.e.:
+# POST https://s3.server.com/bucketname/?delete=&x-purpose=SnapshotMetadata
+#
+# with  http body:
+# <Delete><Quiet>true</Quiet><Object><Key>tests-V46bPKioR7uVceOXYh3NDw/data-_sDkZteNQU6BvaNciUCyaQ.dat</Key></Object><Object><Key>tests-V46bPKioR7uVceOXYh3NDw/master.dat</Key></Object><Object><Key>tests-V46bPKioR7uVceOXYh3NDw/</Key></Object></Delete>
+#
+# and (mandatory) headers:
+#      Content-Type: application/xml
+#      Host: s3.server.com
+#      Content-Md5: <md5 hash hex of payload>   <- mandatory by Minio server, not by Amazon specifications
+#      Content-Length: <length of payload>      <- mandatory by Minio server, not by Amazon specifications
+#
+# all headers must be sorted an lowercased in canonical_request and authorization_header by Amazon specifications
 clear
 
-# reference valiables, from the example above
-ACCESS_KEY="AKIAIOSFODNN7EXAMPLE"
-SECRET_KEY="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-http_path="/"
-host="my-precious-bucket.s3.amazonaws.com"
-region="us-east-1"
-amazonDate="20150915T124500Z"
-dateStamp="20150915"
-method="GET"
-http_query=""
+ACCESS_KEY="your_access_key_here"
+SECRET_KEY="your_secret_key_here"
+http_path="/bucketname/"
+http_query="?delete=&x-purpose=SnapshotMetadata"
+host="s3.server.com"
+region="us-west-1"
+amazonDate="$(date -u +'%Y%m%dT%H%M%SZ')"
+dateStamp="$(date -u +'%Y%m%d')"
+method="POST"
 service="s3"
-# real values should be like:
-# amazonDate="$(date -u +'%Y%m%dT%H%M%SZ')"
-# dateStamp="$(date -u +'%Y%m%d')"
-payload=""
-# real POST payload from elasticsearch for example:
-# payload="<Delete><Quiet>true</Quiet><Object><Key>tests-V46bPKioR7uVceOXYh3NDw/data-_sDkZteNQU6BvaNciUCyaQ.dat</Key></Object><Object><Key>tests-V46bPKioR7uVceOXYh3NDw/master.dat</Key></Object><Object><Key>tests-V46bPKioR7uVceOXYh3NDw/</Key></Object></Delete>"
+content_type="application/xml"
+payload="<Delete><Quiet>true</Quiet><Object><Key>tests-V46bPKioR7uVceOXYh3NDw/data-_sDkZteNQU6BvaNciUCyaQ.dat</Key></Object><Object><Key>tests-V46bPKioR7uVceOXYh3NDw/master.dat</Key></Object><Object><Key>tests-V46bPKioR7uVceOXYh3NDw/</Key></Object></Delete>"
+content_length="${#payload}"
+content_md5=$(echo -ne "${payload}" | openssl dgst -md5 -binary | openssl enc -base64)
 
 function sha256 {
     echo -ne "$1" | openssl dgst -sha256 -hex | awk '{print $2}'
@@ -47,7 +56,7 @@ payload_hash=$(sha256 "${payload}")
 # CanonicalHeaders:
 # You must include the host header (HTTP/1.1) or the :authority header (HTTP/2), and any x-amz-* headers in the signature. You can optionally include other standard headers in the signature, such as content-type.
 
-canonical_request="${method}\n${http_path}\n${http_query}\nhost:${host}\nx-amz-content-sha256:${payload_hash}\nx-amz-date:${amazonDate}\n\nhost;x-amz-content-sha256;x-amz-date\n${payload_hash}"
+canonical_request="${method}\n${http_path}\n${http_query:1}\ncontent-length:${content_length}\ncontent-md5:${content_md5}\ncontent-type:${content_type}\nhost:${host}\nx-amz-content-sha256:${payload_hash}\nx-amz-date:${amazonDate}\n\ncontent-length;content-md5;content-type;host;x-amz-content-sha256;x-amz-date\n${payload_hash}"
 
 canonical_request_hash=$(sha256 "${canonical_request}")
 
@@ -73,7 +82,7 @@ signature=$(hmac_sha256 hexkey:${signingKey} "${string_to_sign}")
 
 # set Authorization header
 # имеет вид: Authorization: <Algorithm> Credential=<Access Key ID/Scope>, SignedHeaders=<SignedHeaders>, Signature=<Signature>
-authorization_header="Authorization: AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${dateStamp}/${region}/${service}/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=${signature}"
+authorization_header="Authorization: AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${dateStamp}/${region}/${service}/aws4_request, SignedHeaders=content-length;content-md5;content-type;host;x-amz-content-sha256;x-amz-date, Signature=${signature}"
 
 
 # DEBUG
@@ -84,6 +93,9 @@ echo "dateStamp=${dateStamp}"
 echo "payload=${payload}"
 echo "payload_hash (x-amz-content-sha256)=${payload_hash}"
 echo "SHA256 of empty string is always=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+echo "signingKey=${signingKey}"
+echo "------------------------"
 
 echo "canonical_request="
 echo -en "${canonical_request}"
@@ -97,9 +109,6 @@ echo "string_to_sign="
 echo -en "${string_to_sign}"
 echo -en "\n------------------------\n"
 
-echo "signingKey=${signingKey}"
-echo "------------------------"
-
 echo "signature=${signature}"
 echo "------------------------"
 
@@ -107,18 +116,23 @@ echo "Authorization header=${authorization_header}"
 echo "------------------------"
 
 echo "now run the following curl:"
-echo -e "curl -x ${method} https://${host}${http_path} \
-\n     -H \"${authorization_header}\" \
+echo -e "curl -X ${method} https://${host}${http_path}${http_query} \
+\n     -H \"x-amz-date: ${amazonDate}\" \
+\n     -H \"Content-Type: ${content_type}\" \
+\n     -H \"Content-Md5: ${content_md5}\" \
+\n     -H \"Host: ${host}\" \
+\n     -H \"Content-Length: ${content_length}\" \
 \n     -H \"x-amz-content-sha256: ${payload_hash}\" \
-\n     -H \"x-amz-date: ${amazonDate}\""
+\n     -H \"${authorization_header}\" \
+\n     -d \"${payload}\""
 
-curl -X ${method} https://${host}${http_path} \
-     -H "${authorization_header}" \
+
+curl -X ${method} https://${host}${http_path}${http_query} \
+     -H "x-amz-date: ${amazonDate}" \
+     -H "Content-Type: ${content_type}" \
+     -H "Content-Md5: ${content_md5}" \
+     -H "Content-Length: ${content_length}" \
+     -H "Host: ${host}" \
      -H "x-amz-content-sha256: ${payload_hash}" \
-     -H "x-amz-date: ${amazonDate}"
-
-# reference curl from the example. With hashes and signatures
-# curl -v https://my-precious-bucket.s3.amazonaws.com/
-#      -H "Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20150915/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=182072eb53d85c36b2d791a1fa46a12d23454ec1e921b02075c23aee40166d5a"
-#      -H "x-amz-content-sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-#      -H "x-amz-date: 20150915T124500Z"
+     -H "${authorization_header}" \
+     -d "${payload}"

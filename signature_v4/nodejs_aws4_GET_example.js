@@ -28,8 +28,8 @@ var opts = { host: 'my-precious-bucket.s3.amazonaws.com', path: '/', method: 'GE
 // aws4.sign() will sign and modify these options, ready to pass to http.request
 aws4.sign(opts, { accessKeyId: 'AKIAIOSFODNN7EXAMPLE', secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY' })
 
-aws4.sign(opts)
 console.log(opts)
+
 /* output should be the following:
 {
   host: 'my-precious-bucket.s3.amazonaws.com',
