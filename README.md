@@ -10,6 +10,7 @@ Modified https://github.com/abustany/s3proxy
 # signature_v4
 
 https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html
+
 https://github.com/mhart/aws4/tree/master?tab=readme-ov-file
 
 - examples of code for AWS signature V4
