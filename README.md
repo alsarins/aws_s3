@@ -3,7 +3,7 @@
 Modified https://github.com/abustany/s3proxy
 ### [See changes](s3proxy/README.md)
 
-# signature_v4 - examples of code for AWS signature V4
+# [signature_v4](signature_v4) - examples of code for AWS signature V4
 
 #### Additional information:
 
