@@ -14,6 +14,7 @@
 - added configurable AwsDomain (for work with local s3 compatible storages)
 
 ## TODO:
+- fix multipart upload (large files)
 - fix some potential issues
 - make some parameters configurable in config file, i.e. region for bucket, http/https scheme for s3 server
 - add Dockerfile for containerization
