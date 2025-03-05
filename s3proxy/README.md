@@ -1,9 +1,10 @@
 # s3proxy - http proxy with transparent encryption (for PUT/POST requests) and decryption (for GET/HEAD).
 
-- Modified https://github.com/abustany/s3proxy
-- Created for elasticsearch client side encryption of snapshots in mind
+- Modified version of https://github.com/abustany/s3proxy
+- Created for elasticsearch backups with client side encryption in mind
 - No authentication implemented (yet)
 - Tested with local s3 compatible storages (Minio/Ceph), not tested with Amazon S3 (I do not have an account for testing)
+- chunked encoding should be disabled (unsupported)
 
 ## Changes:
 - added AWS Signature V4 (signature v2 is unsupported)
@@ -18,6 +19,7 @@
 - add Dockerfile for containerization
 - add support for legacy ASW Signature V2
 - test with Amazon S3
+- add support for chunked encoding
 
 ### usage example:
 s3proxy -debug=true ~/.s3proxy.cfg
