@@ -122,7 +122,9 @@ func (h *ProxyHandler) UpdateObjectMetadata(objectUrl *url.URL, metadata *Object
 		metadataRequest.Header[k] = vs
 	}
 
-	err = h.SignRequest(metadataRequest, info)
+	// metadata не содержит Body (мы не перезаписываем файл в s3), передаем на подпись с пустым Body
+	metadataRequest.Header.Set("Content-Length", "0")
+	err = h.SignRequestV4(metadataRequest, info, []byte(""))
 
 	if err != nil {
 		return err

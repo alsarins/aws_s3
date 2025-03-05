@@ -66,6 +66,7 @@ func parseConfig(filename string) (*Config, error) {
 		if config.RetryDelay < 0 {
 			config.RetryDelay = 0
 		}
+
 	}
 
 	return c, nil

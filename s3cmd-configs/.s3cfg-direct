@@ -1,0 +1,12 @@
+[default]
+access_key = your_access_key_here
+secret_key = your_secret_key_here
+host_base = s3.myserver.com
+host_bucket = s3.myserver.com
+# proxy_host = 127.0.0.1
+# proxy_port = 18000
+use_https = True
+check_ssl_certificate = True
+list_md5 = True
+signature_v2 = False
+bucket_location = us-west-1
