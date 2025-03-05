@@ -1,4 +1,4 @@
-# s3proxy
+# s3proxy - proxy with ecnryption
 
 Modified https://github.com/abustany/s3proxy
 ## [See changes](s3proxy/README.md)
