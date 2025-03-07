@@ -7,7 +7,7 @@
 - chunked encoding should be disabled (unsupported)
 - Multipart uploads unsupported.
 ###  there are some workarounds for multipart problem, i.e:
-  - tune "chunk_size" + "buffer_size" in elasticsearch s3 settings (for example 300MB both), to make it send exactly one file exactly in one POST request, without multiparts
+  - Elasticsearch: tune "chunk_size" + "buffer_size" for s3 repository (for example 300MB both), to make it send exactly one file in exactly one POST request, without multiparts
   - s3cmd tool: enable_multipart = False 
 
 ## Changes:
