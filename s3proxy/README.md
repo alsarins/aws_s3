@@ -5,12 +5,16 @@
 - No authentication implemented (yet)
 - Tested with local s3 compatible storages (Minio/Ceph), not tested with Amazon S3 (I do not have an account for testing)
 - chunked encoding should be disabled (unsupported)
+- Multipart uploads are unsupported.
+###  there are some workarounds for multipart problem, i.e:
+  - tune "chunk_size" + "buffer_size" in elasticsearch s3 settings (for example 300MB both), to make it send exactly one file exactly in one POST request, without multiparts
+  - s3cmd tool: enable_multipart = False 
 
 ## Changes:
 - added AWS Signature V4 (signature v2 is unsupported)
 - added CONNECT method handling
 - fixed Etag (md5) handling when encryption enabled
-- fixed POST requests handling
+- fixed POST requests handling (for /?delete queries, not multipart starting/finishing requests)
 - added configurable AwsDomain (for work with local s3 compatible storages)
 
 ## TODO:
