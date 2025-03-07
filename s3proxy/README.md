@@ -5,7 +5,7 @@
 - No authentication implemented (yet)
 - Tested with local s3 compatible storages (Minio/Ceph), not tested with Amazon S3 (I do not have an account for testing)
 - chunked encoding should be disabled (unsupported)
-- Multipart uploads are unsupported.
+- Multipart uploads unsupported.
 ###  there are some workarounds for multipart problem, i.e:
   - tune "chunk_size" + "buffer_size" in elasticsearch s3 settings (for example 300MB both), to make it send exactly one file exactly in one POST request, without multiparts
   - s3cmd tool: enable_multipart = False 
