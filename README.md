@@ -3,7 +3,7 @@
 Modified https://github.com/abustany/s3proxy
 ### See [changes](s3proxy/README.md)
 
-INFO: Multipart upload is broken now. Fixing
+INFO: Multipart uploads are not supported. It's difficult to encrypt separate parts, instead of whole unencrypted file, and decrypt file back in original consistent state. Looks like it's a big challenge for now. Maybe later there will be a solution for this problem.
 
 # [signature_v4](signature_v4) - examples of code for AWS signature V4
 
