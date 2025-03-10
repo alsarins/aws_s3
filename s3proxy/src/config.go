@@ -19,6 +19,7 @@ type BucketConfig struct {
 	EncryptionKey   string
 	RetryCount      int
 	RetryDelay      int
+	Region          string
 }
 
 type Config struct {
@@ -53,6 +54,10 @@ func parseConfig(filename string) (*Config, error) {
 		return nil, fmt.Errorf("Missing or invalid config parameter Server.Port")
 	}
 
+	if c.Server.AwsDomain == "" {
+		c.Server.AwsDomain = "s3.amazonaws.com" // use Amazon servers if not defined
+	}
+
 	for name, config := range c.Buckets {
 		// Empty AccessKeyId means "use instance profile"
 		if config.AccessKeyId != "" && config.SecretAccessKey == "" {
@@ -65,6 +70,11 @@ func parseConfig(filename string) (*Config, error) {
 
 		if config.RetryDelay < 0 {
 			config.RetryDelay = 0
+		}
+
+		// Устанавливаем значение по умолчанию для Region, если оно не задано
+		if config.Region == "" {
+			config.Region = "us-west-1" // Значение по умолчанию
 		}
 
 	}

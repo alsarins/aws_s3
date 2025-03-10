@@ -8,15 +8,44 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
+	_ "net/http/pprof" // Импортируем pprof
 	"os"
+	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
 
-var CurrentVersion string = "1.0.0"
+var CurrentVersion string = "1.0.6"
+
+func printMemStats() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	log.Printf("Alloc = %v MiB", m.Alloc/1024/1024)
+	log.Printf("TotalAlloc = %v MiB", m.TotalAlloc/1024/1024)
+	log.Printf("Sys = %v MiB", m.Sys/1024/1024)
+	log.Printf("NumGC = %v", m.NumGC)
+}
+
+func startPprofServer() {
+	/* Запускаем HTTP-сервер на localhost:6060 для сбора данных PPROF
+	можно через браузер смотреть, можно через консоль анализировать (удобнее):
+
+	curl -o /tmp/mem.pprof http://localhost:6060/debug/pprof/heap
+	go tool pprof /tmp/mem.pprof
+
+	top — показать топ потребителей памяти.
+	list <функция> — показать распределение памяти по конкретной функции.
+	*/
+
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+}
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage: %s CONFIG_FILE\n", os.Args[0])
@@ -56,8 +85,6 @@ func (h *ProxyHandler) GetBucketSecurityCredentials(c *BucketConfig) (*Credentia
 	return h.credentialCache.GetRoleCredentials()
 }
 
-var AwsDomain = "s3.amazonaws.com"
-
 func (h *ProxyHandler) GetBucketInfo(r *http.Request) *BucketInfo {
 	var portIdx = strings.IndexRune(r.Host, ':')
 
@@ -67,7 +94,7 @@ func (h *ProxyHandler) GetBucketInfo(r *http.Request) *BucketInfo {
 
 	host := r.Host[0:portIdx]
 
-	if !strings.HasSuffix(host, AwsDomain) {
+	if !strings.HasSuffix(host, h.config.Server.AwsDomain) {
 		InfoLogger.Println("Non Amazon domain specified")
 		return nil
 	}
@@ -76,8 +103,8 @@ func (h *ProxyHandler) GetBucketInfo(r *http.Request) *BucketInfo {
 	// Whether the URL was using bucket.s3.amazonaws.com instead of s3.amazonaws.com/bucket/
 	var bucketVirtualHost = false
 
-	if len(host) > len(AwsDomain) {
-		bucketName = host[0 : len(host)-len(AwsDomain)-1]
+	if len(host) > len(h.config.Server.AwsDomain) {
+		bucketName = host[0 : len(host)-len(h.config.Server.AwsDomain)-1]
 		bucketVirtualHost = true
 	} else {
 		tokens := strings.Split(r.URL.Path, "/")
@@ -146,8 +173,8 @@ func (h *ProxyHandler) PostRequestEncryptionHook(r *http.Request, innerResponse 
 	// для GET запросов у нас должно возвращаться дешифрованное Body содержимого файла
 
 	// копируем Body ответа
-	innerResponseBodyData, err := ioutil.ReadAll(innerResponse.Body)
-	innerResponse.Body = ioutil.NopCloser(bytes.NewBuffer(innerResponseBodyData))
+	// innerResponseBodyData, err := ioutil.ReadAll(innerResponse.Body)
+	// innerResponse.Body = ioutil.NopCloser(bytes.NewBuffer(innerResponseBodyData))
 
 	// если не используется шифрование, возвращаем исходное тело запроса
 	if info == nil || info.Config == nil || info.Config.EncryptionKey == "" {
@@ -202,9 +229,9 @@ func (h *ProxyHandler) PostRequestEncryptionHook(r *http.Request, innerResponse 
 		InfoLogger.Printf("Overwrote the response headers with the cached version (Etag: %s, Content-Length: %d)", metadata.Etag, metadata.Size)
 	}
 
-	// еще раз копируем Body ответа
-	innerResponseBodyData, err = ioutil.ReadAll(innerResponse.Body)
-	innerResponse.Body = ioutil.NopCloser(bytes.NewBuffer(innerResponseBodyData))
+	// копируем Body ответа
+	// innerResponseBodyData, err = ioutil.ReadAll(innerResponse.Body)
+	// innerResponse.Body = ioutil.NopCloser(bytes.NewBuffer(innerResponseBodyData))
 
 	if r.Method == "HEAD" {
 		return innerResponse.Body, nil
@@ -240,7 +267,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 
 	// TODO: Нужно сделать bodyData необязательным параметром
 	// если нам не передали bodyData, то вычитываем его из request.
-	// Это может быть в случае запроса на обновление метаданны
+	// Это может быть в случае запроса на обновление метаданных
 
 	// check if we have credentials configured
 	credentials, err := h.GetBucketSecurityCredentials(info.Config)
@@ -248,7 +275,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 		return err
 	}
 
-	region := "us-west-1"       // TODO: make it configurable via config file
+	region := info.Config.Region
 	service := "s3"             // should not be changed
 	payload := string(bodyData) // get request body as string. Hope it's not binary data. TODO: add checks
 
@@ -474,15 +501,31 @@ func connectResponseOK(w http.ResponseWriter, format string, args ...interface{}
 	InfoLogger.Printf(format, args...)
 }
 
-func failRequest(w http.ResponseWriter, format string, args ...interface{}) {
+func failRequest(w http.ResponseWriter, statusCode int, format string, args ...interface{}) {
 	const ErrorFooter = "\n\nGreetings, the S3Proxy\n"
 
-	w.WriteHeader(http.StatusInternalServerError)
+	w.WriteHeader(statusCode) // Используем переданный статус
 	fmt.Fprintf(w, format+ErrorFooter, args...)
 	ErrorLogger.Printf(format, args...)
 }
 
+func GetFunctionName(i interface{}) string {
+	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
+}
+
 func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// выводим состояние памяти
+	fmt.Println("Where:", "start ServeHTTP")
+	printMemStats()
+
+	// // Фиксируем состояние памяти до обработки запроса
+	// f, err := os.Create("/tmp/heap_before.pprof")
+	// if err != nil {
+	// 	log.Fatal("Could not create memory profile: ", err)
+	// }
+	// defer f.Close()
+	// pprof.WriteHeapProfile(f)
+
 	// основная функция, обеспечивающая обработку входящих запросов
 	InfoLogger.Printf("%s %s (Host: %s)", r.Method, r.URL, r.Host)
 
@@ -505,10 +548,26 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// fmt.Println("Where:", "before originalBodyData")
+	// printMemStats()
+
+	defer r.Body.Close() // Закрываем тело запроса принудительно в случае сбоя
+
 	// Делаем копию r.Body оригинального запроса (так как объект io.ReadCloser обнуляется после вычитывания)
 	originalBodyData, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		failRequest(w, http.StatusInternalServerError, "Failed to read request body: %s", err)
+		return
+	}
+
+	// fmt.Println("Where:", "after originalBodyData")
+	// printMemStats()
+
 	// Восстанавливаем r.Body для дальнейшего использования
 	r.Body = ioutil.NopCloser(bytes.NewBuffer(originalBodyData))
+
+	// fmt.Println("Where:", "after r.Body copy back")
+	// printMemStats()
 
 	// TODO: кажется тут можно оптимизировать, нам из всего запроса по факту нужно только Body
 	// копируем http request для рассчета оригинального md5 для PUT запроса
@@ -543,8 +602,15 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// вычисляем статический хэш на основе копии тела запроса
 	originalBodyHashStatic = NewCountingHash(md5.New())
+
+	// fmt.Println("Where:", "after originalBodyData copy")
+	// printMemStats()
+
 	_, _ = io.Copy(originalBodyHashStatic, r.Body)
 	r.Body = ioutil.NopCloser(bytes.NewBuffer(originalBodyData))
+
+	// fmt.Println("Where:", "after r.Body copy back originalBodyData")
+	// printMemStats()
 
 	innerRequest := &http.Request{
 		Method:     r.Method,
@@ -568,6 +634,9 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	innerRequest.URL.Scheme = "https" // force to use https with s3 backend. TODO: make it configurable
 	innerRequest.URL.Host = r.Host
 
+	// fmt.Println("Where:", "after innerRequest constructing")
+	// printMemStats()
+
 	var originalBodyHash *CountingHash
 
 	// нам нужно шифровать и заменять md5 хэши в случае PUT запросов
@@ -579,12 +648,18 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = ioutil.NopCloser(teereader)
 	}
 
+	// fmt.Println("Where:", "after originalBodyHash constructing")
+	// printMemStats()
+
 	// шифруем Body и получаем хэш шифрованного запроса (если оно включено в конфиге)
 	// innerBodyHash динамически меняется
 	innerBodyHash, err := h.PreRequestEncryptionHook(r, innerRequest, info)
 
+	// fmt.Println("Where:", "after PreRequestEncryptionHook")
+	// printMemStats()
+
 	if err != nil {
-		failRequest(w, "Error while setting up encryption: %s", err)
+		failRequest(w, http.StatusInternalServerError, "Error while setting up encryption: %s", err)
 		return
 	}
 
@@ -594,21 +669,35 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		copyRequest := innerRequest.Header.Get("x-amz-copy-source")
 		if copyRequest == "" {
 			// это не PUT запрос для обновления метаданных (у него пустой Body) и включено шифрование, значит берем Body после шифрования
+			// Внимание, здесь мы читаем шифрованное тело в переменную , увеличивая занятую память на размер тела пакета
 			innerRequestBodyData, err = ioutil.ReadAll(innerRequest.Body)
 			if err != nil {
-				failRequest(w, "Error while reading request body: %s", err)
+				failRequest(w, http.StatusInternalServerError, "Error while reading request body: %s", err)
 				return
 			}
 			innerRequest.Body = ioutil.NopCloser(bytes.NewBuffer(innerRequestBodyData))
 		}
+		// fmt.Println("Where:", "before h.SignRequestV4(innerRequestBodyData)")
+		// printMemStats()
 		err = h.SignRequestV4(innerRequest, info, innerRequestBodyData)
+		// обнуляем переменную
+		innerRequestBodyData = []byte("")
 	} else {
 		// если шифрование не включено, отдаем на подпись оригинальное тело запроса
+		// fmt.Println("Where:", "before h.SignRequestV4(originalBodyData)")
+		// printMemStats()
 		err = h.SignRequestV4(innerRequest, info, originalBodyData)
 	}
 
+	// fmt.Println("Where:", "after h.SignRequestV4")
+	// printMemStats()
+
+	// defer func() {
+	// 	originalBodyData = nil // Освобождаем ссылку на данные, если на переменную нет больше ссылок. Ускоряем garbage collector
+	// }()
+
 	if err != nil {
-		failRequest(w, "Error while signing the request: %s", err)
+		failRequest(w, http.StatusInternalServerError, "Error while signing the request: %s", err)
 		return
 	}
 
@@ -628,6 +717,17 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// посылаем запрос на сервер и получаем ответ
 		innerResponse, err = h.client.Do(innerRequest)
 
+		if err != nil {
+			failRequest(w, http.StatusInternalServerError, "Error while serving the request: %s", err)
+			return
+		}
+
+		defer func() {
+			if innerResponse != nil && innerResponse.Body != nil {
+				innerResponse.Body.Close()
+			}
+		}()
+
 		if err == nil && innerResponse.StatusCode < 300 {
 			break
 		}
@@ -643,7 +743,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err != nil {
-			failRequest(w, "Error while serving the request: %s", err)
+			failRequest(w, http.StatusInternalServerError, "Error while serving the request: %s", err)
 			return
 		}
 
@@ -655,12 +755,6 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		break
 	}
-
-	defer func() {
-		if innerResponse != nil && innerResponse.Body != nil {
-			innerResponse.Body.Close()
-		}
-	}()
 
 	if dataCheckNeeded {
 		// если мы здесь, значит обрабатываем PUT запрос
@@ -700,7 +794,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			err = h.UpdateObjectMetadata(innerRequest.URL, metadata, r.Header, info)
 
 			if err != nil {
-				failRequest(w, "Error while updating metadata: %s", err)
+				failRequest(w, http.StatusInternalServerError, "Error while updating metadata: %s", err)
 				return
 			}
 		}
@@ -710,7 +804,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	responseReader, err := h.PostRequestEncryptionHook(r, innerResponse, info)
 
 	if err != nil {
-		failRequest(w, "Error while setting up decryption: %s", err)
+		failRequest(w, http.StatusInternalServerError, "Error while setting up decryption: %s", err)
 		return
 	}
 
@@ -722,6 +816,16 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(innerResponse.StatusCode)
 	io.Copy(w, responseReader)
+
+	fmt.Println("Where:", "end of ServeHTTP")
+	printMemStats()
+	// // Фиксируем состояние памяти после обработки запросов
+	// f2, err := os.Create("/tmp/heap_after.pprof")
+	// if err != nil {
+	// 	log.Fatal("Could not create memory profile: ", err)
+	// }
+	// defer f2.Close()
+	// pprof.WriteHeapProfile(f2)
 }
 
 func NewProxyHandler(config *Config) *ProxyHandler {
@@ -731,15 +835,14 @@ func NewProxyHandler(config *Config) *ProxyHandler {
 	}
 
 	return &ProxyHandler{
-		config,
-		&http.Client{
-			Transport: transport,
-		},
-		NewCredentialCache(),
+		config:          config,
+		client:          &http.Client{Transport: transport},
+		credentialCache: NewCredentialCache(),
 	}
 }
 
 func main() {
+	startPprofServer() // Запускаем сервер pprof
 	// если приложение запущено с флагом командной строки -debug=true то выводим доп информацию в stdout
 	var debugMode = flag.Bool("debug", false, "Enable debug messages")
 
@@ -767,10 +870,7 @@ func main() {
 
 	listenAddress := fmt.Sprintf("%s:%d", config.Server.Address, config.Server.Port)
 
-	if len(config.Server.AwsDomain) > 0 {
-		AwsDomain = config.Server.AwsDomain
-		InfoLogger.Printf("Use AwsDomain=%s from configuration file\n", AwsDomain)
-	}
+	InfoLogger.Printf("Use AwsDomain=%s\n", handler.config.Server.AwsDomain)
 
 	http.ListenAndServe(listenAddress, handler)
 
