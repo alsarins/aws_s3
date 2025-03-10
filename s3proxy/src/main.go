@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+var CurrentVersion string = "1.0.0"
+
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage: %s CONFIG_FILE\n", os.Args[0])
 	fmt.Fprintf(os.Stderr, "HTTP proxy that authenticates S3 requests\n")
@@ -750,7 +752,7 @@ func main() {
 
 	if *debugMode {
 		enableDebugMode(*debugMode)
-		InfoLogger.Print("Enabling debug messages. Version 1.0")
+		InfoLogger.Print("Enabling debug messages. Version ", CurrentVersion)
 	}
 
 	// читаем конфигурационный файл, запускаем слушающий процесс, ждем запросов на обработку
