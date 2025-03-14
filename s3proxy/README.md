@@ -15,7 +15,11 @@
 - added CONNECT method handling
 - fixed Etag (md5) handling when encryption enabled
 - fixed POST requests handling (for /?delete queries, not multipart starting/finishing requests)
-- added configurable AwsDomain (for work with local s3 compatible storages)
+- added configurable AwsDomain (for work with local s3 compatible storages), region and protocol for s3 server
+- added trace level messages
+- added pprof server on localhost:6060 for metrics monitoring
+- performance optimizations
+- added Dockerfile (not really tested docker container, but building process is successfull)
 
 ## TODO:
 - fix multipart upload (large files)
