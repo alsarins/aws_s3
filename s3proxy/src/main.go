@@ -316,6 +316,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 	content_type := r.Header.Get("Content-Type")
 	content_length := r.Header.Get("Content-Length")
 
+	TraceLogger.Println("Where:", "before adding Content-Type, Content-Length, Content-Md5")
 	// добавляем Content-Type, Content-Length, Content-Md5 для POST запросов, если их нет. Для других - вроде необязательно
 	if r.Method == "POST" {
 		if content_type == "" {
@@ -341,6 +342,8 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 
 	}
 
+	TraceLogger.Println("Where:", "after adding Content-Type, Content-Length, Content-Md5")
+
 	// добавить Date и/или X-Amz-Date header. Что-то из двух точно должно быть, могут быть сразу оба, тогда приоритет у Date
 	amazonDate := r.Header.Get("Date")
 	if amazonDate == "" && r.Header.Get("x-amz-date") == "" {
@@ -350,8 +353,10 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 		amazonDate = r.Header.Get("x-amz-date")
 	}
 
+	TraceLogger.Println("Where:", "before X-Amz-Content-Sha256")
 	// Добавить заголовок X-Amz-Content-Sha256
-	r.Header.Set("X-Amz-Content-Sha256", calculateSHA256(payload))
+	r.Header.Set("X-Amz-Content-Sha256", calculateSHA256Optimized(payload))
+	TraceLogger.Println("Where:", "after X-Amz-Content-Sha256")
 
 	// x-amz-security-token - не знаю что это, но тоже пусть будет
 	if credentials.Token != "" {
@@ -589,8 +594,10 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Создаем буфер для хранения оригинального тела запроса
 	var originalBodyData bytes.Buffer
 	originalBodyHashStatic := NewCountingHash(md5.New())
-	teereader := io.TeeReader(r.Body, io.MultiWriter(&originalBodyData, originalBodyHashStatic))
 	// Копируем данные из r.Body в originalBodyData и originalBodyHashStatic
+	// INFO: тяжелая операция, зависит от размера пакета:
+	TraceLogger.Println("Where:", "before originalBodyData copy")
+	teereader := io.TeeReader(r.Body, io.MultiWriter(&originalBodyData, originalBodyHashStatic))
 	_, _ = io.Copy(io.Discard, teereader)
 	TraceLogger.Println("Where:", "after originalBodyData copy")
 
@@ -712,26 +719,24 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		copyRequest := innerRequest.Header.Get("x-amz-copy-source")
 		if copyRequest == "" {
 			// это не PUT запрос для обновления метаданных (у него пустой Body) и включено шифрование, значит берем Body после шифрования
-			// Внимание, здесь мы читаем шифрованное тело в переменную , увеличивая занятую память на размер тела пакета
+			// Внимание, здесь мы читаем шифрованное тело в переменную, увеличивая занятую память на размер тела пакета
 			// innerRequestBodyData, err = ioutil.ReadAll(innerRequest.Body)
-
+			// INFO: тяжелая операция, зависит от размера пакета
+			TraceLogger.Println("Where:", "before io.Copy(&innerRequestBodyData)")
 			_, err := io.Copy(&innerRequestBodyData, innerRequest.Body)
 			if err != nil {
 				failRequest(w, http.StatusInternalServerError, "Error while copying request body: %s", err)
 				return
 			}
+			TraceLogger.Println("Where:", "after io.Copy(&innerRequestBodyData)")
 
-			// // Сохраняем тело запроса в файл
+			// Сохраняем тело запроса в файл
 			// err = os.WriteFile("/tmp/debug_request_body.file", innerRequestBodyData, 0644)
 			// if err != nil {
 			// 	failRequest(w, http.StatusInternalServerError, "Error while saving request body to file: %s", err)
 			// 	return
 			// }
 
-			if err != nil {
-				failRequest(w, http.StatusInternalServerError, "Error while reading request body: %s", err)
-				return
-			}
 			innerRequest.Body = ioutil.NopCloser(bytes.NewBuffer(innerRequestBodyData.Bytes()))
 		}
 		TraceLogger.Println("Where:", "before h.SignRequestV4(innerRequestBodyData)")
@@ -895,6 +900,21 @@ func NewProxyHandler(config *Config) *ProxyHandler {
 		credentialCache: NewCredentialCache(),
 	}
 }
+
+// benchmarkFunction запускает функцию несколько раз и возвращает среднее время выполнения
+// func benchmarkFunction(name string, fn func(string) string, data string, iterations int) {
+// 	var totalDuration time.Duration
+
+// 	for i := 0; i < iterations; i++ {
+// 		start := time.Now()
+// 		fn(data) // Выполняем функцию
+// 		duration := time.Since(start)
+// 		totalDuration += duration
+// 	}
+
+// 	avgDuration := totalDuration / time.Duration(iterations)
+// 	fmt.Printf("%s: Среднее время выполнения за %d итераций: %v\n", name, iterations, avgDuration)
+// }
 
 func main() {
 	startPprofServer() // Запускаем сервер pprof
