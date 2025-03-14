@@ -14,6 +14,7 @@ import (
 	"strings"
 )
 
+// calculateMD5Optimized — оптимизированная функция с буферизацией
 func calculateMD5Optimized(data string) string {
 	hash := md5.New()
 	reader := strings.NewReader(data)
@@ -35,17 +36,56 @@ func calculateMD5Optimized(data string) string {
 	return base64.StdEncoding.EncodeToString(hash.Sum(nil))
 }
 
+// calculateSHA256Stream вычисляет SHA256 хэш для данных, читаемых из io.Reader
+// полезно, если данные поступают из файла, сети или другого источника, который поддерживает потоковое чтение
+// вызывать надо примерно так:
+// hash, err := calculateSHA256Stream(resp.Body)
+// но если вызвать 2 раза подряд, то будет проблема, так как io.Copy сдвигает смещение в конец Body
+func calculateSHA256Stream(reader io.Reader) (string, error) {
+	hash := sha256.New()
+
+	// Копируем данные из reader в хэш-функцию
+	if _, err := io.Copy(hash, reader); err != nil {
+		return "", err
+	}
+
+	// Возвращаем хэш в hex-формате
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// calculateSHA256Optimized — оптимизированная функция с буферизацией
+func calculateSHA256Optimized(data string) string {
+	hash := sha256.New()
+	reader := strings.NewReader(data)
+	buf := make([]byte, 32*1024) // 32KB буфер
+
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			hash.Write(buf[:n])
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return ""
+		}
+	}
+
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
 func calculateSHA256(data string) string {
 	// калькуляция sha256 хэша в hex формате
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:])
 }
 
-// func calculateMD5(data string) string {
-// 	// калькуляция md5 хэша в hex формате
-// 	hash := md5.Sum([]byte(data))
-// 	return base64.StdEncoding.EncodeToString(hash[:])
-// }
+func calculateMD5(data string) string {
+	// калькуляция md5 хэша в hex формате
+	hash := md5.Sum([]byte(data))
+	return base64.StdEncoding.EncodeToString(hash[:])
+}
 
 func createSignedHeadersV4(headers http.Header) string {
 	// создание списка подписанных заголовков. Должны быть в lowercase, отсортированы по алфавиту, через ";"
@@ -101,7 +141,7 @@ func createCanonicalRequestV4(r *http.Request, payload string) string {
 	// создаем заголовки канонического запроса
 	canonicalHeaders := createCanonicalHeadersV4(r.Header)
 	signedHeaders := createSignedHeadersV4(r.Header)
-	payloadHash := calculateSHA256(payload)
+	payloadHash := calculateSHA256Optimized(payload)
 
 	return fmt.Sprintf("%s\n%s\n%s\n%s\n%s\n%s",
 		method,
@@ -130,7 +170,7 @@ func createStringToSignV4(r *http.Request, canonicalRequest, region, service str
 	algorithm := "AWS4-HMAC-SHA256"
 	date := r.Header.Get("X-Amz-Date")
 	scope := fmt.Sprintf("%s/%s/%s/aws4_request", date[:8], region, service)
-	canonicalRequestHash := calculateSHA256(canonicalRequest)
+	canonicalRequestHash := calculateSHA256Optimized(canonicalRequest)
 
 	return fmt.Sprintf("%s\n%s\n%s\n%s",
 		algorithm,
