@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-var CurrentVersion string = "1.0.6"
+var CurrentVersion string = "1.0.8"
 
 func printMemStats() {
 	TraceLogger.Println("Where:", "printMemStats")
@@ -104,7 +104,7 @@ func (h *ProxyHandler) GetBucketSecurityCredentials(c *BucketConfig) (*Credentia
 
 func (h *ProxyHandler) GetBucketInfo(r *http.Request) *BucketInfo {
 	TraceLogger.Println("Where:", "GetBucketInfo")
-	var portIdx = strings.IndexRune(r.Host, ':')
+	portIdx := strings.IndexRune(r.Host, ':')
 
 	if portIdx == -1 {
 		portIdx = len(r.Host)
@@ -119,7 +119,7 @@ func (h *ProxyHandler) GetBucketInfo(r *http.Request) *BucketInfo {
 
 	var bucketName string
 	// Whether the URL was using  bucket.s3.amazonaws.com instead of s3.amazonaws.com/bucket/
-	var bucketVirtualHost = false
+	bucketVirtualHost := false
 
 	if len(host) > len(h.config.Server.AwsDomain) {
 		bucketName = host[0 : len(host)-len(h.config.Server.AwsDomain)-1]
@@ -335,7 +335,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 
 		content_md5 := r.Header.Get("Content-Md5")
 		if content_md5 == "" {
-			content_md5 = calculateMD5(payload)
+			content_md5 = calculateMD5Optimized(payload)
 			r.Header.Set("Content-Md5", content_md5)
 		}
 
@@ -586,19 +586,28 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	defer r.Body.Close() // Закрываем тело запроса принудительно в случае сбоя
 
-	// Делаем копию r.Body оригинального запроса (так как объект io.ReadCloser обнуляется после вычитывания)
-	originalBodyData, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		failRequest(w, http.StatusInternalServerError, "Failed to read request body: %s", err)
-		return
-	}
+	// Создаем буфер для хранения оригинального тела запроса
+	var originalBodyData bytes.Buffer
+	originalBodyHashStatic := NewCountingHash(md5.New())
+	teereader := io.TeeReader(r.Body, io.MultiWriter(&originalBodyData, originalBodyHashStatic))
+	// Копируем данные из r.Body в originalBodyData и originalBodyHashStatic
+	_, _ = io.Copy(io.Discard, teereader)
 	TraceLogger.Println("Where:", "after originalBodyData copy")
 
-	// TraceLogger.Println("Where:", "after originalBodyData")
+	// Восстанавливаем r.Body для дальнейшего использования
+	r.Body = ioutil.NopCloser(&originalBodyData)
+
+	// // Делаем копию r.Body оригинального запроса (так как объект io.ReadCloser обнуляется после вычитывания)
+	// originalBodyData, err := ioutil.ReadAll(r.Body)
+	// if err != nil {
+	// 	failRequest(w, http.StatusInternalServerError, "Failed to read request body: %s", err)
+	// 	return
+	// }
+
 	// printMemStats()
 
 	// Восстанавливаем r.Body для дальнейшего использования
-	r.Body = ioutil.NopCloser(bytes.NewBuffer(originalBodyData))
+	// r.Body = ioutil.NopCloser(bytes.NewBuffer(originalBodyData))
 
 	TraceLogger.Println("Where:", "after r.Body copy back")
 	// printMemStats()
@@ -632,29 +641,28 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// }
 
 	// создаем статический хэш для тела запроса, потому что io.TeeReader его меняет по мере вычитывания данных
-	var originalBodyHashStatic *CountingHash
+	// var originalBodyHashStatic *CountingHash
 
 	// вычисляем статический хэш на основе копии тела запроса
-	originalBodyHashStatic = NewCountingHash(md5.New())
+	// originalBodyHashStatic = NewCountingHash(md5.New())
 
-	TraceLogger.Println("Where:", "after originalBodyHashStatic md5 counting")
+	// TraceLogger.Println("Where:", "after originalBodyHashStatic md5 counting")
 	// printMemStats()
 
-	_, _ = io.Copy(originalBodyHashStatic, r.Body)
-	r.Body = ioutil.NopCloser(bytes.NewBuffer(originalBodyData))
+	// _, _ = io.Copy(originalBodyHashStatic, r.Body)
+	// r.Body = ioutil.NopCloser(bytes.NewBuffer(originalBodyData))
 
-	TraceLogger.Println("Where:", "after r.Body copy back originalBodyData")
+	// TraceLogger.Println("Where:", "after r.Body copy back originalBodyData")
 	// printMemStats()
 
 	innerRequest := &http.Request{
-		Method:     r.Method,
-		URL:        r.URL,
-		Proto:      r.Proto,
-		ProtoMajor: r.ProtoMajor,
-		ProtoMinor: r.ProtoMinor,
-		Header:     r.Header,
-		Body:       r.Body,
-		// Body:             ioutil.NopCloser(bytes.NewBuffer(originalBodyData)), // Копируем тело
+		Method:           r.Method,
+		URL:              r.URL,
+		Proto:            r.Proto,
+		ProtoMajor:       r.ProtoMajor,
+		ProtoMinor:       r.ProtoMinor,
+		Header:           r.Header,
+		Body:             r.Body,
 		ContentLength:    r.ContentLength,
 		TransferEncoding: r.TransferEncoding,
 		Close:            r.Close,
@@ -697,30 +705,43 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	innerRequestBodyData := []byte("")
+	var innerRequestBodyData bytes.Buffer
+
 	if info.Config != nil && info.Config.EncryptionKey != "" {
 		// мы должны передавать на подпись шифрованное тело запроса, вместо оригинального при включенном шифровании
 		copyRequest := innerRequest.Header.Get("x-amz-copy-source")
 		if copyRequest == "" {
 			// это не PUT запрос для обновления метаданных (у него пустой Body) и включено шифрование, значит берем Body после шифрования
 			// Внимание, здесь мы читаем шифрованное тело в переменную , увеличивая занятую память на размер тела пакета
-			innerRequestBodyData, err = ioutil.ReadAll(innerRequest.Body)
+			// innerRequestBodyData, err = ioutil.ReadAll(innerRequest.Body)
+
+			_, err := io.Copy(&innerRequestBodyData, innerRequest.Body)
+			if err != nil {
+				failRequest(w, http.StatusInternalServerError, "Error while copying request body: %s", err)
+				return
+			}
+
+			// // Сохраняем тело запроса в файл
+			// err = os.WriteFile("/tmp/debug_request_body.file", innerRequestBodyData, 0644)
+			// if err != nil {
+			// 	failRequest(w, http.StatusInternalServerError, "Error while saving request body to file: %s", err)
+			// 	return
+			// }
+
 			if err != nil {
 				failRequest(w, http.StatusInternalServerError, "Error while reading request body: %s", err)
 				return
 			}
-			innerRequest.Body = ioutil.NopCloser(bytes.NewBuffer(innerRequestBodyData))
+			innerRequest.Body = ioutil.NopCloser(bytes.NewBuffer(innerRequestBodyData.Bytes()))
 		}
 		TraceLogger.Println("Where:", "before h.SignRequestV4(innerRequestBodyData)")
 		// printMemStats()
-		err = h.SignRequestV4(innerRequest, info, innerRequestBodyData)
-		// обнуляем переменную
-		innerRequestBodyData = []byte("")
+		err = h.SignRequestV4(innerRequest, info, innerRequestBodyData.Bytes())
 	} else {
 		// если шифрование не включено, отдаем на подпись оригинальное тело запроса
 		TraceLogger.Println("Where:", "before h.SignRequestV4(originalBodyData)")
 		// printMemStats()
-		err = h.SignRequestV4(innerRequest, info, originalBodyData)
+		err = h.SignRequestV4(innerRequest, info, originalBodyData.Bytes())
 	}
 
 	TraceLogger.Println("Where:", "after h.SignRequestV4")
