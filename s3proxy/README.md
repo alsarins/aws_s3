@@ -22,13 +22,15 @@
 - added Dockerfile (not really tested docker container, but building process is successfull)
 
 ## TODO:
-- fix multipart upload (large files)
+- fix multipart upload (large files) - hard to implement, tend to not support this feature
 - fix some potential issues
-- make some parameters configurable in config file, i.e. region for bucket, http/https scheme for s3 server
-- add Dockerfile for containerization
 - add support for legacy AWS Signature V2
 - test with Amazon S3
-- add support for chunked encoding
+- add support for chunked encoding HTTP requests
 
-### usage example:
+### usage examples:
+```
+s3proxy ~/.s3proxy.cfg
 s3proxy -debug=true ~/.s3proxy.cfg
+s3proxy -debug=trace ~/.s3proxy.cfg
+```
