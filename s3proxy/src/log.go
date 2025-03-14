@@ -9,12 +9,14 @@ import (
 
 var InfoLogger *log.Logger
 var ErrorLogger *log.Logger
+var TraceLogger *log.Logger
 
 const LogInfoPrefix = "INFO  "
 const LogErrorPrefix = "ERROR "
+const LogTracePrefix = "TRACE "
 
 func makeLogger(output io.Writer, prefix string) *log.Logger {
-	return log.New(output, prefix, log.LstdFlags|log.Lshortfile)
+	return log.New(output, prefix, log.LstdFlags|log.Lshortfile|log.Lmicroseconds)
 }
 
 func init() {
@@ -22,12 +24,18 @@ func init() {
 	ErrorLogger = makeLogger(os.Stderr, LogErrorPrefix)
 }
 
-func enableDebugMode(enable bool) {
-	var w = ioutil.Discard
+func enableDebugMode(debugLevel string) {
+	var infoOutput io.Writer = ioutil.Discard
+	var traceOutput io.Writer = ioutil.Discard
 
-	if enable {
-		w = os.Stdout
+	switch debugLevel {
+	case "true":
+		infoOutput = os.Stdout
+	case "trace":
+		infoOutput = os.Stdout
+		traceOutput = os.Stdout
 	}
 
-	InfoLogger = makeLogger(w, LogInfoPrefix)
+	InfoLogger = makeLogger(infoOutput, LogInfoPrefix)
+	TraceLogger = makeLogger(traceOutput, LogTracePrefix)
 }

@@ -18,6 +18,7 @@ type ObjectMetadata struct {
 }
 
 func SerializeObjectMetadata(m *ObjectMetadata, w io.Writer) error {
+	TraceLogger.Println("Where:", "SerializeObjectMetadata")
 	_, err := w.Write([]byte{S3ProxyMetadataVersion})
 
 	if err != nil {
@@ -35,10 +36,13 @@ func SerializeObjectMetadata(m *ObjectMetadata, w io.Writer) error {
 
 	_, err = io.Copy(w, strings.NewReader(m.Etag))
 
+	TraceLogger.Println("Where:", "end SerializeObjectMetadata")
+
 	return err
 }
 
 func UnserializeObjectMetadata(r io.Reader) (*ObjectMetadata, error) {
+	TraceLogger.Println("Where:", "UnserializeObjectMetadata")
 	bufReader := bufio.NewReader(r)
 
 	metadataVersion := make([]byte, 1)
@@ -63,6 +67,7 @@ func UnserializeObjectMetadata(r io.Reader) (*ObjectMetadata, error) {
 		return nil, err
 	}
 
+	TraceLogger.Println("Where:", "end UnserializeObjectMetadata")
 	return &ObjectMetadata{
 		size,
 		string(etag),
@@ -70,6 +75,7 @@ func UnserializeObjectMetadata(r io.Reader) (*ObjectMetadata, error) {
 }
 
 func (h *ProxyHandler) UpdateObjectMetadata(objectUrl *url.URL, metadata *ObjectMetadata, originalHeaders http.Header, info *BucketInfo) error {
+	TraceLogger.Println("Where:", "UpdateObjectMetadata")
 	if info == nil || info.Config == nil {
 		return nil
 	}
@@ -132,6 +138,7 @@ func (h *ProxyHandler) UpdateObjectMetadata(objectUrl *url.URL, metadata *Object
 
 	metadataResponse, err := h.client.Do(metadataRequest)
 
+	TraceLogger.Println("Where:", "end UpdateObjectMetadata")
 	if err != nil {
 		return err
 	}
