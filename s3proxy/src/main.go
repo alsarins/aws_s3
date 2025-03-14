@@ -10,9 +10,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	_ "net/http/pprof" // Импортируем pprof
+	_ "net/http/pprof"
 	"os"
-	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -23,12 +22,10 @@ import (
 var CurrentVersion string = "1.0.6"
 
 func printMemStats() {
+	TraceLogger.Println("Where:", "printMemStats")
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	log.Printf("Alloc = %v MiB", m.Alloc/1024/1024)
-	log.Printf("TotalAlloc = %v MiB", m.TotalAlloc/1024/1024)
-	log.Printf("Sys = %v MiB", m.Sys/1024/1024)
-	log.Printf("NumGC = %v", m.NumGC)
+	TraceLogger.Printf("Alloc = %v MiB, TotalAlloc = %v MiB, Sys = %v MiB, NumGC = %v\n", m.Alloc/1024/1024, m.TotalAlloc/1024/1024, m.Sys/1024/1024, m.NumGC)
 }
 
 func startPprofServer() {
@@ -45,6 +42,7 @@ func startPprofServer() {
 	go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
+
 }
 
 func usage() {
@@ -74,7 +72,25 @@ type ProxyHandler struct {
 const S3ProxyMetadataHeader = "X-Amz-Meta-S3proxy"
 const S3ProxyMetadataVersion = byte(0x00)
 
+func IsMultipartRequest(r *http.Request) bool {
+	// check if we have one or more multipart parameters in URL
+	query := r.URL.Query()
+
+	// Список параметров, которые нужно проверить
+	requiredParams := []string{"uploads", "uploadId"}
+
+	for _, param := range requiredParams {
+		if _, ok := query[param]; ok {
+			return true
+		}
+	}
+
+	return false
+
+}
+
 func (h *ProxyHandler) GetBucketSecurityCredentials(c *BucketConfig) (*Credentials, error) {
+	TraceLogger.Println("Where:", "GetBucketSecurityCredentials")
 	if c.AccessKeyId != "" {
 		return &Credentials{
 			AccessKeyId:     c.AccessKeyId,
@@ -82,10 +98,12 @@ func (h *ProxyHandler) GetBucketSecurityCredentials(c *BucketConfig) (*Credentia
 		}, nil
 	}
 
+	TraceLogger.Println("Where:", "end GetBucketSecurityCredentials")
 	return h.credentialCache.GetRoleCredentials()
 }
 
 func (h *ProxyHandler) GetBucketInfo(r *http.Request) *BucketInfo {
+	TraceLogger.Println("Where:", "GetBucketInfo")
 	var portIdx = strings.IndexRune(r.Host, ':')
 
 	if portIdx == -1 {
@@ -100,7 +118,7 @@ func (h *ProxyHandler) GetBucketInfo(r *http.Request) *BucketInfo {
 	}
 
 	var bucketName string
-	// Whether the URL was using bucket.s3.amazonaws.com instead of s3.amazonaws.com/bucket/
+	// Whether the URL was using  bucket.s3.amazonaws.com instead of s3.amazonaws.com/bucket/
 	var bucketVirtualHost = false
 
 	if len(host) > len(h.config.Server.AwsDomain) {
@@ -120,6 +138,7 @@ func (h *ProxyHandler) GetBucketInfo(r *http.Request) *BucketInfo {
 		}
 	}
 
+	TraceLogger.Println("Where:", "end GetBucketInfo")
 	return &BucketInfo{
 		Name:        bucketName,
 		VirtualHost: bucketVirtualHost,
@@ -128,6 +147,7 @@ func (h *ProxyHandler) GetBucketInfo(r *http.Request) *BucketInfo {
 }
 
 func (h *ProxyHandler) PreRequestEncryptionHook(r *http.Request, innerRequest *http.Request, info *BucketInfo) (*CountingHash, error) {
+	TraceLogger.Println("Where:", "PreRequestEncryptionHook")
 	// если это не PUT запрос или не задан info.Config.EncryptionKey то не требуется шифрование
 	if info == nil || info.Config == nil || info.Config.EncryptionKey == "" || r.Method != "PUT" {
 		return nil, nil
@@ -165,10 +185,12 @@ func (h *ProxyHandler) PreRequestEncryptionHook(r *http.Request, innerRequest *h
 
 	InfoLogger.Print("Encrypting the request")
 
+	TraceLogger.Println("Where:", "end PreRequestEncryptionHook")
 	return innerBodyHash, nil
 }
 
 func (h *ProxyHandler) PostRequestEncryptionHook(r *http.Request, innerResponse *http.Response, info *BucketInfo) (io.ReadCloser, error) {
+	TraceLogger.Println("Where:", "PostRequestEncryptionHook")
 	// для PUT запросов у нас нет тела ответа, там должны вернуться только корректный StatusCode и заголовки типа Etag
 	// для GET запросов у нас должно возвращаться дешифрованное Body содержимого файла
 
@@ -250,6 +272,7 @@ func (h *ProxyHandler) PostRequestEncryptionHook(r *http.Request, innerResponse 
 		innerResponse.Header.Set("Content-Length", strconv.FormatInt(innerResponse.ContentLength, 10))
 	}
 
+	TraceLogger.Println("Where:", "end PostRequestEncryptionHook")
 	return decryptedReader, nil
 }
 
@@ -258,6 +281,7 @@ func IsValidXML(data []byte) bool {
 }
 
 func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData []byte) error {
+	TraceLogger.Println("Where:", "SignRequestV4")
 	// https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-auth-using-authorization-header.html
 
 	// если у нас нет инфо о бакете, то выходим. Это может быть в случае запроса отличного от GET/PUT/POST, такие мы не обрабатываем
@@ -287,6 +311,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 		r.Header.Del(header_to_remove)
 	}
 
+	TraceLogger.Println("Where:", "before adding headers")
 	// проверяем и добавляем нужные
 	content_type := r.Header.Get("Content-Type")
 	content_length := r.Header.Get("Content-Length")
@@ -357,34 +382,39 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 	// добавляем в заголовок Host
 	r.Header.Set("Host", r.URL.Host)
 
+	TraceLogger.Println("Where:", "before createCanonicalRequestV4")
 	// Шаг 1: создаем канонический запрос
 	canonicalRequest := createCanonicalRequestV4(r, payload)
 
 	// DEBUG
-	// fmt.Printf("Canonical Request:\n%s\n", canonicalRequest)
-	// fmt.Println("----------------------------------------------")
+	// TraceLogger.Printf("Canonical Request:\n%s\n", canonicalRequest)
+	// TraceLogger.Println("----------------------------------------------")
 
+	TraceLogger.Println("Where:", "before createStringToSignV4")
 	// Шаг 2: Создать строку для подписи
 	stringToSign := createStringToSignV4(r, canonicalRequest, region, service)
 
 	// DEBUG
-	// fmt.Printf("StringToSign:\n%s\n", stringToSign)
-	// fmt.Println("----------------------------------------------")
+	// TraceLogger.Printf("StringToSign:\n%s\n", stringToSign)
+	// TraceLogger.Println("----------------------------------------------")
 
+	TraceLogger.Println("Where:", "before getSigningKey")
 	// Шаг 3: Вычисляем ключ для подписи
 	signingKey := getSigningKey(credentials.SecretAccessKey, r.Header.Get("X-Amz-Date")[:8], region, service)
 
 	// DEBUG
-	// fmt.Printf("signingKey:%s\n", hex.EncodeToString(signingKey))
-	// fmt.Println("----------------------------------------------")
+	// TraceLogger.Printf("signingKey:%s\n", hex.EncodeToString(signingKey))
+	// TraceLogger.Println("----------------------------------------------")
 
+	TraceLogger.Println("Where:", "before calculateSignatureV4")
 	// Шаг 5: Вычисляем подпись на основе ключа и строки для подписи
 	signature_v4 := calculateSignatureV4(signingKey, stringToSign)
 
 	// DEBUG
-	// fmt.Printf("signature:%s\n", signature_v4)
-	// fmt.Println("----------------------------------------------")
+	// TraceLogger.Printf("signature:%s\n", signature_v4)
+	// TraceLogger.Println("----------------------------------------------")
 
+	TraceLogger.Println("Where:", "before Authorization header")
 	// Добавляем подпись в заголовок Authorization
 	r.Header.Set("Authorization", fmt.Sprintf("AWS4-HMAC-SHA256 Credential=%s/%s/%s/%s/aws4_request, SignedHeaders=%s, Signature=%s",
 		credentials.AccessKeyId,
@@ -395,6 +425,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 		signature_v4,
 	))
 
+	TraceLogger.Println("Where:", "end SignRequestV4")
 	return nil
 }
 
@@ -509,13 +540,9 @@ func failRequest(w http.ResponseWriter, statusCode int, format string, args ...i
 	ErrorLogger.Printf(format, args...)
 }
 
-func GetFunctionName(i interface{}) string {
-	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
-}
-
 func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// выводим состояние памяти
-	fmt.Println("Where:", "start ServeHTTP")
+	TraceLogger.Println("Where:", "start ServeHTTP")
 	printMemStats()
 
 	// // Фиксируем состояние памяти до обработки запроса
@@ -535,6 +562,12 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if IsMultipartRequest(r) && (r.Method == "PUT" || r.Method == "POST") {
+		fmt.Println("IsMultipartRequest = true. end with http.StatusNotImplemented")
+		failRequest(w, http.StatusNotImplemented, "Multiparts are not supported: %s", r.Method)
+		return
+	}
+
 	// читаем конфигурацию для бакета
 	info := h.GetBucketInfo(r)
 
@@ -548,7 +581,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// fmt.Println("Where:", "before originalBodyData")
+	// TraceLogger.Println("Where:", "before originalBodyData")
 	// printMemStats()
 
 	defer r.Body.Close() // Закрываем тело запроса принудительно в случае сбоя
@@ -559,14 +592,15 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		failRequest(w, http.StatusInternalServerError, "Failed to read request body: %s", err)
 		return
 	}
+	TraceLogger.Println("Where:", "after originalBodyData copy")
 
-	// fmt.Println("Where:", "after originalBodyData")
+	// TraceLogger.Println("Where:", "after originalBodyData")
 	// printMemStats()
 
 	// Восстанавливаем r.Body для дальнейшего использования
 	r.Body = ioutil.NopCloser(bytes.NewBuffer(originalBodyData))
 
-	// fmt.Println("Where:", "after r.Body copy back")
+	TraceLogger.Println("Where:", "after r.Body copy back")
 	// printMemStats()
 
 	// TODO: кажется тут можно оптимизировать, нам из всего запроса по факту нужно только Body
@@ -603,13 +637,13 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// вычисляем статический хэш на основе копии тела запроса
 	originalBodyHashStatic = NewCountingHash(md5.New())
 
-	// fmt.Println("Where:", "after originalBodyData copy")
+	TraceLogger.Println("Where:", "after originalBodyHashStatic md5 counting")
 	// printMemStats()
 
 	_, _ = io.Copy(originalBodyHashStatic, r.Body)
 	r.Body = ioutil.NopCloser(bytes.NewBuffer(originalBodyData))
 
-	// fmt.Println("Where:", "after r.Body copy back originalBodyData")
+	TraceLogger.Println("Where:", "after r.Body copy back originalBodyData")
 	// printMemStats()
 
 	innerRequest := &http.Request{
@@ -634,7 +668,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	innerRequest.URL.Scheme = "https" // force to use https with s3 backend. TODO: make it configurable
 	innerRequest.URL.Host = r.Host
 
-	// fmt.Println("Where:", "after innerRequest constructing")
+	TraceLogger.Println("Where:", "after innerRequest constructing")
 	// printMemStats()
 
 	var originalBodyHash *CountingHash
@@ -648,14 +682,14 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = ioutil.NopCloser(teereader)
 	}
 
-	// fmt.Println("Where:", "after originalBodyHash constructing")
+	TraceLogger.Println("Where:", "after originalBodyHash constructing")
 	// printMemStats()
 
 	// шифруем Body и получаем хэш шифрованного запроса (если оно включено в конфиге)
 	// innerBodyHash динамически меняется
 	innerBodyHash, err := h.PreRequestEncryptionHook(r, innerRequest, info)
 
-	// fmt.Println("Where:", "after PreRequestEncryptionHook")
+	TraceLogger.Println("Where:", "after PreRequestEncryptionHook")
 	// printMemStats()
 
 	if err != nil {
@@ -677,19 +711,19 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			innerRequest.Body = ioutil.NopCloser(bytes.NewBuffer(innerRequestBodyData))
 		}
-		// fmt.Println("Where:", "before h.SignRequestV4(innerRequestBodyData)")
+		TraceLogger.Println("Where:", "before h.SignRequestV4(innerRequestBodyData)")
 		// printMemStats()
 		err = h.SignRequestV4(innerRequest, info, innerRequestBodyData)
 		// обнуляем переменную
 		innerRequestBodyData = []byte("")
 	} else {
 		// если шифрование не включено, отдаем на подпись оригинальное тело запроса
-		// fmt.Println("Where:", "before h.SignRequestV4(originalBodyData)")
+		TraceLogger.Println("Where:", "before h.SignRequestV4(originalBodyData)")
 		// printMemStats()
 		err = h.SignRequestV4(innerRequest, info, originalBodyData)
 	}
 
-	// fmt.Println("Where:", "after h.SignRequestV4")
+	TraceLogger.Println("Where:", "after h.SignRequestV4")
 	// printMemStats()
 
 	// defer func() {
@@ -817,7 +851,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(innerResponse.StatusCode)
 	io.Copy(w, responseReader)
 
-	fmt.Println("Where:", "end of ServeHTTP")
+	TraceLogger.Println("Where:", "end of ServeHTTP")
 	printMemStats()
 	// // Фиксируем состояние памяти после обработки запросов
 	// f2, err := os.Create("/tmp/heap_after.pprof")
@@ -843,8 +877,8 @@ func NewProxyHandler(config *Config) *ProxyHandler {
 
 func main() {
 	startPprofServer() // Запускаем сервер pprof
-	// если приложение запущено с флагом командной строки -debug=true то выводим доп информацию в stdout
-	var debugMode = flag.Bool("debug", false, "Enable debug messages")
+	// если приложение запущено с флагом командной строки -debug=XXX то выводим доп информацию в stdout
+	var debugLevel = flag.String("debug", "false", "trace")
 
 	flag.Parse()
 
@@ -853,10 +887,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *debugMode {
-		enableDebugMode(*debugMode)
-		InfoLogger.Print("Enabling debug messages. Version ", CurrentVersion)
-	}
+	enableDebugMode(*debugLevel)
+
+	// если включено логирование, то сообщаем об этом
+	InfoLogger.Printf("Enabling debug messages (debug=%s). Version %s", *debugLevel, CurrentVersion)
 
 	// читаем конфигурационный файл, запускаем слушающий процесс, ждем запросов на обработку
 	config, err := parseConfig(flag.Args()[0])
