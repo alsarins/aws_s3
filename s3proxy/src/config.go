@@ -20,6 +20,7 @@ type BucketConfig struct {
 	RetryCount      int
 	RetryDelay      int
 	Region          string
+	Protocol        string
 }
 
 type Config struct {
@@ -74,7 +75,14 @@ func parseConfig(filename string) (*Config, error) {
 
 		// Устанавливаем значение по умолчанию для Region, если оно не задано
 		if config.Region == "" {
-			config.Region = "us-west-1" // Значение по умолчанию
+			config.Region = "us-west-1"
+		}
+
+		// Устанавливаем значение по умолчанию для Protocol, если оно не задано
+		if config.Protocol == "" {
+			config.Protocol = "https"
+		} else if config.Protocol != "" && (config.Protocol != "http" && config.Protocol != "https") {
+			return nil, fmt.Errorf("Wrong config parameter Protocol for bucket '%s'. Must be http or https", name)
 		}
 
 	}

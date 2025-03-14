@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-var CurrentVersion string = "1.0.9"
+var CurrentVersion string = "1.0.10"
 
 func printMemStats() {
 	TraceLogger.Println("Where:", "printMemStats")
@@ -219,7 +219,7 @@ func (h *ProxyHandler) PostRequestEncryptionHook(r *http.Request, innerResponse 
 	}
 
 	// TODO: здесь нужно добавить проверку на метаданные. Если в метаданных есть данные для дешифрации, только тогда запускать дешифрацию.
-	// Иначе следующие шаги вместо валидной дешифрации вовзвращают мусор
+	// Иначе следующие шаги вместо валидной дешифрации возвращают мусор
 
 	InfoLogger.Print("Decrypting the response")
 
@@ -682,7 +682,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Trailer:          r.Trailer,
 	}
 
-	innerRequest.URL.Scheme = "https" // force to use https with s3 backend. TODO: make it configurable
+	innerRequest.URL.Scheme = info.Config.Protocol
 	innerRequest.URL.Host = r.Host
 
 	TraceLogger.Println("Where:", "after innerRequest constructing")
