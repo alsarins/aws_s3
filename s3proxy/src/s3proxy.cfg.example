@@ -4,7 +4,6 @@
 		"Port": 18000,
 		"DisableKeepAlives": false
 	},
-
 	"Buckets": {
 		"AWS bucket name": {
 			"AccessKeyId": "",
