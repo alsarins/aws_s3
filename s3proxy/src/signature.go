@@ -7,11 +7,33 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 )
+
+func calculateMD5Optimized(data string) string {
+	hash := md5.New()
+	reader := strings.NewReader(data)
+	buf := make([]byte, 32*1024) // 32KB буфер
+
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			hash.Write(buf[:n])
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return ""
+		}
+	}
+
+	return base64.StdEncoding.EncodeToString(hash.Sum(nil))
+}
 
 func calculateSHA256(data string) string {
 	// калькуляция sha256 хэша в hex формате
@@ -19,11 +41,11 @@ func calculateSHA256(data string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func calculateMD5(data string) string {
-	// калькуляция md5 хэша в hex формате
-	hash := md5.Sum([]byte(data))
-	return base64.StdEncoding.EncodeToString(hash[:])
-}
+// func calculateMD5(data string) string {
+// 	// калькуляция md5 хэша в hex формате
+// 	hash := md5.Sum([]byte(data))
+// 	return base64.StdEncoding.EncodeToString(hash[:])
+// }
 
 func createSignedHeadersV4(headers http.Header) string {
 	// создание списка подписанных заголовков. Должны быть в lowercase, отсортированы по алфавиту, через ";"

@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-var CurrentVersion string = "1.0.7-dev"
+var CurrentVersion string = "1.0.8"
 
 func printMemStats() {
 	TraceLogger.Println("Where:", "printMemStats")
@@ -335,7 +335,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 
 		content_md5 := r.Header.Get("Content-Md5")
 		if content_md5 == "" {
-			content_md5 = calculateMD5(payload)
+			content_md5 = calculateMD5Optimized(payload)
 			r.Header.Set("Content-Md5", content_md5)
 		}
 
