@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-var CurrentVersion string = "1.0.8"
+var CurrentVersion string = "1.0.9"
 
 func printMemStats() {
 	TraceLogger.Println("Where:", "printMemStats")
@@ -598,7 +598,9 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// INFO: тяжелая операция, зависит от размера пакета:
 	TraceLogger.Println("Where:", "before originalBodyData copy")
 	teereader := io.TeeReader(r.Body, io.MultiWriter(&originalBodyData, originalBodyHashStatic))
-	_, _ = io.Copy(io.Discard, teereader)
+	buf := make([]byte, 1<<20) // 1MB буфер
+	_, err := io.CopyBuffer(io.Discard, teereader, buf)
+	// _, _ = io.Copy(io.Discard, teereader)		// original copy
 	TraceLogger.Println("Where:", "after originalBodyData copy")
 
 	// Восстанавливаем r.Body для дальнейшего использования
@@ -722,13 +724,15 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// Внимание, здесь мы читаем шифрованное тело в переменную, увеличивая занятую память на размер тела пакета
 			// innerRequestBodyData, err = ioutil.ReadAll(innerRequest.Body)
 			// INFO: тяжелая операция, зависит от размера пакета
-			TraceLogger.Println("Where:", "before io.Copy(&innerRequestBodyData)")
-			_, err := io.Copy(&innerRequestBodyData, innerRequest.Body)
+			TraceLogger.Println("Where:", "before io.CopyBuffer(&innerRequestBodyData, ...")
+			// _, err := io.Copy(&innerRequestBodyData, innerRequest.Body)		// original copy
+			buf := make([]byte, 1<<20) // 1MB буфер
+			_, err := io.CopyBuffer(&innerRequestBodyData, innerRequest.Body, buf)
 			if err != nil {
 				failRequest(w, http.StatusInternalServerError, "Error while copying request body: %s", err)
 				return
 			}
-			TraceLogger.Println("Where:", "after io.Copy(&innerRequestBodyData)")
+			TraceLogger.Println("Where:", "after io.CopyBuffer(&innerRequestBodyData, ...")
 
 			// Сохраняем тело запроса в файл
 			// err = os.WriteFile("/tmp/debug_request_body.file", innerRequestBodyData, 0644)
