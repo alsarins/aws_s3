@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-var CurrentVersion string = "1.0.10"
+var CurrentVersion string = "1.0.11"
 
 func printMemStats() {
 	TraceLogger.Println("Where:", "printMemStats")
@@ -300,8 +300,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 	}
 
 	region := info.Config.Region
-	service := "s3"             // should not be changed
-	payload := string(bodyData) // get request body as string. Hope it's not binary data. TODO: add checks
+	service := "s3" // should not be changed
 
 	// формируем заголовки для канонического запроса.
 	// сначала убираем ненужные
@@ -321,7 +320,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 	if r.Method == "POST" {
 		if content_type == "" {
 			content_type = "text/plain" // Считаем, что нам должен прийти просто текст. Если будет octet-stream то могут быть проблемы. TODO: добавить проверок, при необходимости перейти на []byte
-			if len(payload) > 0 {
+			if len(bodyData) > 0 {
 				if IsValidXML(bodyData) {
 					content_type = "application/xml"
 				}
@@ -330,13 +329,13 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 		}
 
 		if content_length == "" {
-			content_length = string(len(payload))
+			content_length = string(len(bodyData))
 			r.Header.Set("Content-Length", content_length)
 		}
 
 		content_md5 := r.Header.Get("Content-Md5")
 		if content_md5 == "" {
-			content_md5 = calculateMD5Optimized(payload)
+			content_md5 = calculateMD5Optimized(bodyData)
 			r.Header.Set("Content-Md5", content_md5)
 		}
 
@@ -355,7 +354,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 
 	TraceLogger.Println("Where:", "before X-Amz-Content-Sha256")
 	// Добавить заголовок X-Amz-Content-Sha256
-	r.Header.Set("X-Amz-Content-Sha256", calculateSHA256Optimized(payload))
+	r.Header.Set("X-Amz-Content-Sha256", calculateSHA256Optimized(bodyData))
 	TraceLogger.Println("Where:", "after X-Amz-Content-Sha256")
 
 	// x-amz-security-token - не знаю что это, но тоже пусть будет
@@ -389,7 +388,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 
 	TraceLogger.Println("Where:", "before createCanonicalRequestV4")
 	// Шаг 1: создаем канонический запрос
-	canonicalRequest := createCanonicalRequestV4(r, payload)
+	canonicalRequest := createCanonicalRequestV4(r, bodyData)
 
 	// DEBUG
 	// TraceLogger.Printf("Canonical Request:\n%s\n", canonicalRequest)

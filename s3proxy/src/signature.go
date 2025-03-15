@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/sha256"
@@ -14,10 +15,10 @@ import (
 	"strings"
 )
 
-// calculateMD5Optimized — оптимизированная функция с буферизацией
-func calculateMD5Optimized(data string) string {
+func calculateMD5Optimized(data []byte) string {
+	// calculateMD5Optimized — оптимизированная функция с буферизацией
 	hash := md5.New()
-	reader := strings.NewReader(data)
+	reader := bytes.NewReader(data)
 	buf := make([]byte, 32*1024) // 32KB буфер
 
 	for {
@@ -36,12 +37,12 @@ func calculateMD5Optimized(data string) string {
 	return base64.StdEncoding.EncodeToString(hash.Sum(nil))
 }
 
-// calculateSHA256Stream вычисляет SHA256 хэш для данных, читаемых из io.Reader
-// полезно, если данные поступают из файла, сети или другого источника, который поддерживает потоковое чтение
-// вызывать надо примерно так:
-// hash, err := calculateSHA256Stream(resp.Body)
-// но если вызвать 2 раза подряд, то будет проблема, так как io.Copy сдвигает смещение в конец Body
 func calculateSHA256Stream(reader io.Reader) (string, error) {
+	// calculateSHA256Stream вычисляет SHA256 хэш для данных, читаемых из io.Reader
+	// полезно, если данные поступают из файла, сети или другого источника, который поддерживает потоковое чтение
+	// вызывать надо примерно так:
+	// hash, err := calculateSHA256Stream(resp.Body)
+	// но если вызвать 2 раза подряд, то будет проблема, так как io.Copy сдвигает смещение в конец Body
 	hash := sha256.New()
 
 	// Копируем данные из reader в хэш-функцию
@@ -53,10 +54,10 @@ func calculateSHA256Stream(reader io.Reader) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-// calculateSHA256Optimized — оптимизированная функция с буферизацией
-func calculateSHA256Optimized(data string) string {
+func calculateSHA256Optimized(data []byte) string {
+	// calculateSHA256Optimized — оптимизированная функция с буферизацией
 	hash := sha256.New()
-	reader := strings.NewReader(data)
+	reader := bytes.NewReader(data)
 	buf := make([]byte, 32*1024) // 32KB буфер
 
 	for {
@@ -76,13 +77,13 @@ func calculateSHA256Optimized(data string) string {
 }
 
 func calculateSHA256(data string) string {
-	// калькуляция sha256 хэша в hex формате
+	// оригинальное SHA256 хэширование в hex формате
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:])
 }
 
 func calculateMD5(data string) string {
-	// калькуляция md5 хэша в hex формате
+	// оригинальное MD5 хэширование в hex формате
 	hash := md5.Sum([]byte(data))
 	return base64.StdEncoding.EncodeToString(hash[:])
 }
@@ -107,7 +108,7 @@ func createCanonicalHeadersV4(headers http.Header) string {
 	return strings.Join(canonicalHeaders, "\n") + "\n"
 }
 
-func createCanonicalRequestV4(r *http.Request, payload string) string {
+func createCanonicalRequestV4(r *http.Request, payload []byte) string {
 	// создание канонического запроса
 	// https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html#create-canonical-request
 
@@ -170,7 +171,7 @@ func createStringToSignV4(r *http.Request, canonicalRequest, region, service str
 	algorithm := "AWS4-HMAC-SHA256"
 	date := r.Header.Get("X-Amz-Date")
 	scope := fmt.Sprintf("%s/%s/%s/aws4_request", date[:8], region, service)
-	canonicalRequestHash := calculateSHA256Optimized(canonicalRequest)
+	canonicalRequestHash := calculateSHA256Optimized([]byte(canonicalRequest))
 
 	return fmt.Sprintf("%s\n%s\n%s\n%s",
 		algorithm,
