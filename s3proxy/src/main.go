@@ -117,6 +117,7 @@ func (h *ProxyHandler) GetBucketInfo(r *http.Request) *BucketInfo {
 		return nil
 	}
 
+	fmt.Println("main.go 3")
 	var bucketName string
 	// Whether the URL was using  bucket.s3.amazonaws.com instead of s3.amazonaws.com/bucket/
 	bucketVirtualHost := false
@@ -302,6 +303,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 	region := info.Config.Region
 	service := "s3" // should not be changed
 
+	TraceLogger.Println("Where:", "SignRequestV4 1")
 	// формируем заголовки для канонического запроса.
 	// сначала убираем ненужные
 	headers_to_ignore := []string{"authorization", "connection", "x-amzn-trace-id", "user-agent", "expect", "presigned-expires", "range", "proxy-connection", "accept-encoding"}
@@ -329,7 +331,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 		}
 
 		if content_length == "" {
-			content_length = string(len(bodyData))
+			content_length = fmt.Sprint(len(bodyData))
 			r.Header.Set("Content-Length", content_length)
 		}
 
@@ -777,8 +779,10 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var innerResponse *http.Response
 
 	for {
+		TraceLogger.Println("Where:", "before h.client.Do(innerRequest)")
 		// посылаем запрос на сервер и получаем ответ
 		innerResponse, err = h.client.Do(innerRequest)
+		TraceLogger.Println("Where:", "after h.client.Do(innerRequest)")
 
 		if err != nil {
 			failRequest(w, http.StatusInternalServerError, "Error while serving the request: %s", err)
