@@ -158,7 +158,8 @@ func (h *ProxyHandler) PreRequestEncryptionHook(r *http.Request, innerRequest *h
 
 	// если у нас есть заголовок x-amz-copy-source, то мы делаем PUT запрос обновления метаданных
 	// он не содержит Body, в нем только заголовки, шифрование не требуется
-	for k, _ := range r.Header {
+	//  цикл только по ключам, значения нам не нужны
+	for k := range r.Header {
 		if strings.HasPrefix(strings.ToLower(k), "x-amz-copy-source") {
 			return nil, nil
 		}
@@ -350,8 +351,6 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 	if amazonDate == "" && r.Header.Get("x-amz-date") == "" {
 		amazonDate = time.Now().UTC().Format("20060102T150405Z")
 		r.Header.Set("Date", amazonDate)
-	} else {
-		amazonDate = r.Header.Get("x-amz-date")
 	}
 
 	TraceLogger.Println("Where:", "before X-Amz-Content-Sha256")
@@ -368,7 +367,8 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 	canonicalizedAmzHeaders := bytes.NewBuffer(nil)
 	amzHeaders := []string{}
 
-	for k, _ := range r.Header {
+	//  цикл только по ключам, значения нам не нужны
+	for k := range r.Header {
 		if !strings.HasPrefix(strings.ToLower(k), "x-amz-") {
 			continue
 		}
@@ -601,6 +601,10 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	teereader := io.TeeReader(r.Body, io.MultiWriter(&originalBodyData, originalBodyHashStatic))
 	buf := make([]byte, 1<<20) // 1MB буфер
 	_, err := io.CopyBuffer(io.Discard, teereader, buf)
+	if err != nil {
+		failRequest(w, http.StatusInternalServerError, "Failed to read original request body: %s", err)
+		return
+	}
 	// _, _ = io.Copy(io.Discard, teereader)		// original copy
 	TraceLogger.Println("Where:", "after originalBodyData copy")
 
@@ -828,16 +832,16 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// awsEtag := innerResponse.Header.Get("Etag") // оригинальный md5 ОТВЕТА от сервера (после отправки шифрованного или нешифрованного запроса)
 
 		// это оригинальный md5 и Etag шифрованного (либо нешифрованного) ЗАПРОСА
-		bodyHash := innerBodyHash
+		// bodyHash := innerBodyHash
 
-		if bodyHash == nil {
-			// если мы здесь, значит либо шифрование не использовалось, либо это x-amz-copy-source (когда мы обновляем только метаданные)
-			// См. PreRequestEncryptionHook
-			bodyHash = originalBodyHash
-		} else {
-			// если же шифрование использовалось, то берем md5 первоначального (нешифрованного) запроса
-			bodyHash = originalBodyHashStatic
-		}
+		// if bodyHash == nil {
+		// 	// если мы здесь, значит либо шифрование не использовалось, либо это x-amz-copy-source (когда мы обновляем только метаданные)
+		// 	// См. PreRequestEncryptionHook
+		// 	bodyHash = originalBodyHash
+		// } else {
+		// 	// если же шифрование использовалось, то берем md5 первоначального (нешифрованного) запроса
+		// 	bodyHash = originalBodyHashStatic
+		// }
 
 		// innerEtag := fmt.Sprintf("\"%x\"", bodyHash.Sum(nil))		// это md5 нешифрованного запроса, который подготовил наш прокси
 
@@ -882,7 +886,11 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(innerResponse.StatusCode)
-	io.Copy(w, responseReader)
+	_, err = io.Copy(w, responseReader)
+	if err != nil {
+		failRequest(w, http.StatusInternalServerError, "Error while copying response body: %s", err)
+		return
+	}
 
 	TraceLogger.Println("Where:", "end of ServeHTTP")
 	printMemStats()
@@ -954,6 +962,9 @@ func main() {
 
 	InfoLogger.Printf("Use AwsDomain=%s\n", handler.config.Server.AwsDomain)
 
-	http.ListenAndServe(listenAddress, handler)
+	// http.ListenAndServe(listenAddress, handler)
+	if err := http.ListenAndServe(listenAddress, handler); err != nil {
+		ErrorLogger.Fatalf("Failed to start s3 proxy server: %v", err)
+	}
 
 }

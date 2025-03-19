@@ -37,23 +37,6 @@ func calculateMD5Optimized(data []byte) string {
 	return base64.StdEncoding.EncodeToString(hash.Sum(nil))
 }
 
-func calculateSHA256Stream(reader io.Reader) (string, error) {
-	// calculateSHA256Stream вычисляет SHA256 хэш для данных, читаемых из io.Reader
-	// полезно, если данные поступают из файла, сети или другого источника, который поддерживает потоковое чтение
-	// вызывать надо примерно так:
-	// hash, err := calculateSHA256Stream(resp.Body)
-	// но если вызвать 2 раза подряд, то будет проблема, так как io.Copy сдвигает смещение в конец Body
-	hash := sha256.New()
-
-	// Копируем данные из reader в хэш-функцию
-	if _, err := io.Copy(hash, reader); err != nil {
-		return "", err
-	}
-
-	// Возвращаем хэш в hex-формате
-	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
 func calculateSHA256Optimized(data []byte) string {
 	// calculateSHA256Optimized — оптимизированная функция с буферизацией
 	hash := sha256.New()
@@ -76,17 +59,17 @@ func calculateSHA256Optimized(data []byte) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-func calculateSHA256(data string) string {
-	// оригинальное SHA256 хэширование в hex формате
-	hash := sha256.Sum256([]byte(data))
-	return hex.EncodeToString(hash[:])
-}
+// func calculateSHA256(data string) string {
+// 	// оригинальное SHA256 хэширование в hex формате
+// 	hash := sha256.Sum256([]byte(data))
+// 	return hex.EncodeToString(hash[:])
+// }
 
-func calculateMD5(data string) string {
-	// оригинальное MD5 хэширование в hex формате
-	hash := md5.Sum([]byte(data))
-	return base64.StdEncoding.EncodeToString(hash[:])
-}
+// func calculateMD5(data string) string {
+// 	// оригинальное MD5 хэширование в hex формате
+// 	hash := md5.Sum([]byte(data))
+// 	return base64.StdEncoding.EncodeToString(hash[:])
+// }
 
 func createSignedHeadersV4(headers http.Header) string {
 	// создание списка подписанных заголовков. Должны быть в lowercase, отсортированы по алфавиту, через ";"
@@ -118,7 +101,7 @@ func createCanonicalRequestV4(r *http.Request, payload []byte) string {
 	canonicalURI := r.URL.Path
 
 	// canonicalQuery - разобранные параметры запроса (после символа ? в URL)
-	var canonicalQuery string = ""
+	var canonicalQuery string
 
 	// разбираем параметры запроса, если они есть и формируем canonicalQuery
 	req_params, _ := url.ParseQuery(r.URL.RawQuery)
