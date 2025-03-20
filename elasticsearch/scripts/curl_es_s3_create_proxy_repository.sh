@@ -1,6 +1,6 @@
 #!/bin/bash
 # elasticsearch command to create s3 repository "s3_proxy" (via encrypting http proxy on localhost:18000)
-curl -k -X PUT 'https://elastic:passwd_here@localhost:9200/_snapshot/s3_proxy?pretty' -H 'Content-Type: application/json' -d '{
+curl -u elastic -k -X PUT 'https://localhost:9200/_snapshot/s3_proxy?pretty' -H 'Content-Type: application/json' -d '{
    "type": "s3",
    "settings": {
      "bucket": "esbucket",
