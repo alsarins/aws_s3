@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-var CurrentVersion string = "1.0.11"
+var CurrentVersion string = "1.0.12"
 
 func printMemStats() {
 	TraceLogger.Println("Where:", "printMemStats")
@@ -687,7 +687,15 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Trailer:          r.Trailer,
 	}
 
-	innerRequest.URL.Scheme = info.Config.Protocol
+	TraceLogger.Println("Where:", "before innerRequest.URL.Scheme")
+	if info.Config == nil {
+		innerRequest.URL.Scheme = "https" // fallback to https if no bucket specified, or non s3 request
+	} else {
+		innerRequest.URL.Scheme = info.Config.Protocol
+	}
+
+	TraceLogger.Println("Where:", "after innerRequest.URL.Scheme")
+
 	innerRequest.URL.Host = r.Host
 
 	TraceLogger.Println("Where:", "after innerRequest constructing")
