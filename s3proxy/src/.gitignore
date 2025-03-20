@@ -1,3 +1,4 @@
+bin/*
 s3proxy
 *.swp
 *.pprof

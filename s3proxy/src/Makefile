@@ -1,22 +1,29 @@
-# Имя бинарного файла
 BINARY=s3proxy
 
-# Цель по умолчанию
+# Платформа по умолчанию (текущая)
+GOOS=$(shell go env GOOS)
+GOARCH=$(shell go env GOARCH)
+
+# Целевая платформа (Linux)
+TARGET_GOOS=linux
+TARGET_GOARCH=amd64
+
 .PHONY: all
 all: build
 
-# Цель для сборки
 build:
-	go build -o $(BINARY)
+	mkdir -p ./bin
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o ./bin/$(BINARY)
 
-# Цель для установки
+build-linux:
+	mkdir -p ./bin
+	GOOS=$(TARGET_GOOS) GOARCH=$(TARGET_GOARCH) go build -o ./bin/$(BINARY)-linux
+
 .PHONY: install
 install: build
-	sudo cp $(BINARY) /usr/local/bin/
+	sudo cp ./bin/$(BINARY) /usr/local/bin/
 	sudo chmod +x /usr/local/bin/$(BINARY)
 
-# Цель для очистки
 .PHONY: clean
 clean:
-	rm -f $(BINARY)
-
+	rm -rf ./bin
