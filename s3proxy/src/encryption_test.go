@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"strings"
 	"testing"
 )
@@ -52,7 +52,7 @@ func TestEncryption(t *testing.T) {
 			t.Fatalf("Error while setting up encryption: %s", err)
 		}
 
-		encryptedPayloads[i], err = ioutil.ReadAll(encReader)
+		encryptedPayloads[i], err = io.ReadAll(encReader)
 
 		if err != nil {
 			t.Fatalf("Error while encrypting data: %s", err)
@@ -71,7 +71,7 @@ func TestEncryption(t *testing.T) {
 			t.Fatalf("Error while setting up decryption: %s", err)
 		}
 
-		decryptedPayload, err := ioutil.ReadAll(decReader)
+		decryptedPayload, err := io.ReadAll(decReader)
 
 		if err != nil {
 			t.Fatalf("Error while decrypting data: %s", err)
@@ -90,7 +90,7 @@ func TestEncryption(t *testing.T) {
 			t.Fatalf("Error while setting up decryption: %s", err)
 		}
 
-		decryptedPayload, err = ioutil.ReadAll(decReader)
+		decryptedPayload, err = io.ReadAll(decReader)
 
 		if err != nil {
 			t.Fatalf("Error while decrypting data: %s", err)
