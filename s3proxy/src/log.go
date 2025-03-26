@@ -2,7 +2,6 @@ package main
 
 import (
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 )
@@ -20,13 +19,13 @@ func makeLogger(output io.Writer, prefix string) *log.Logger {
 }
 
 func init() {
-	InfoLogger = makeLogger(ioutil.Discard, LogInfoPrefix)
+	InfoLogger = makeLogger(io.Discard, LogInfoPrefix)
 	ErrorLogger = makeLogger(os.Stderr, LogErrorPrefix)
 }
 
 func enableDebugMode(debugLevel string) {
-	var infoOutput io.Writer = ioutil.Discard
-	var traceOutput io.Writer = ioutil.Discard
+	var infoOutput io.Writer = io.Discard
+	var traceOutput io.Writer = io.Discard
 
 	switch debugLevel {
 	case "true":

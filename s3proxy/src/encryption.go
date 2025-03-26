@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
-	"io/ioutil"
 )
 
 func SetupCipher(info *BucketInfo, ivReader io.Reader) (cipher.Block, []byte, error) {
@@ -41,7 +40,7 @@ func SetupReadEncryption(input io.Reader, info *BucketInfo) (io.ReadCloser, int6
 		R: input,
 	}
 
-	return ioutil.NopCloser(reader), int64(len(iv)), nil
+	return io.NopCloser(reader), int64(len(iv)), nil
 }
 
 func SetupWriteEncryption(input io.Reader, info *BucketInfo) (io.ReadCloser, int64, error) {
@@ -59,5 +58,5 @@ func SetupWriteEncryption(input io.Reader, info *BucketInfo) (io.ReadCloser, int
 		R: input,
 	}
 
-	return ioutil.NopCloser(io.MultiReader(ivReader, reader)), int64(len(iv)), nil
+	return io.NopCloser(io.MultiReader(ivReader, reader)), int64(len(iv)), nil
 }

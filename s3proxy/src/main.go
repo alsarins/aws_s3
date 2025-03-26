@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
@@ -178,7 +177,7 @@ func (h *ProxyHandler) PreRequestEncryptionHook(r *http.Request, innerRequest *h
 	// they match.
 	innerBodyHash := NewCountingHash(md5.New())
 	teereader := io.TeeReader(encryptedInput, innerBodyHash)
-	innerRequest.Body = ioutil.NopCloser(teereader)
+	innerRequest.Body = io.NopCloser(teereader)
 
 	if length := innerRequest.ContentLength; length != -1 {
 		innerRequest.ContentLength += extralen
@@ -197,8 +196,8 @@ func (h *ProxyHandler) PostRequestEncryptionHook(r *http.Request, innerResponse 
 	// для GET запросов у нас должно возвращаться дешифрованное Body содержимого файла
 
 	// копируем Body ответа
-	// innerResponseBodyData, err := ioutil.ReadAll(innerResponse.Body)
-	// innerResponse.Body = ioutil.NopCloser(bytes.NewBuffer(innerResponseBodyData))
+	// innerResponseBodyData, err := io.ReadAll(innerResponse.Body)
+	// innerResponse.Body = io.NopCloser(bytes.NewBuffer(innerResponseBodyData))
 
 	// если не используется шифрование, возвращаем исходное тело запроса
 	if info == nil || info.Config == nil || info.Config.EncryptionKey == "" {
@@ -254,8 +253,8 @@ func (h *ProxyHandler) PostRequestEncryptionHook(r *http.Request, innerResponse 
 	}
 
 	// копируем Body ответа
-	// innerResponseBodyData, err = ioutil.ReadAll(innerResponse.Body)
-	// innerResponse.Body = ioutil.NopCloser(bytes.NewBuffer(innerResponseBodyData))
+	// innerResponseBodyData, err = io.ReadAll(innerResponse.Body)
+	// innerResponse.Body = io.NopCloser(bytes.NewBuffer(innerResponseBodyData))
 
 	if r.Method == "HEAD" {
 		return innerResponse.Body, nil
@@ -609,10 +608,10 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	TraceLogger.Println("Where:", "after originalBodyData copy")
 
 	// Восстанавливаем r.Body для дальнейшего использования
-	r.Body = ioutil.NopCloser(&originalBodyData)
+	r.Body = io.NopCloser(&originalBodyData)
 
 	// // Делаем копию r.Body оригинального запроса (так как объект io.ReadCloser обнуляется после вычитывания)
-	// originalBodyData, err := ioutil.ReadAll(r.Body)
+	// originalBodyData, err := io.ReadAll(r.Body)
 	// if err != nil {
 	// 	failRequest(w, http.StatusInternalServerError, "Failed to read request body: %s", err)
 	// 	return
@@ -621,7 +620,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// printMemStats()
 
 	// Восстанавливаем r.Body для дальнейшего использования
-	// r.Body = ioutil.NopCloser(bytes.NewBuffer(originalBodyData))
+	// r.Body = io.NopCloser(bytes.NewBuffer(originalBodyData))
 
 	TraceLogger.Println("Where:", "after r.Body copy back")
 	// printMemStats()
@@ -636,7 +635,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 	ProtoMajor:       r.ProtoMajor,
 	// 	ProtoMinor:       r.ProtoMinor,
 	// 	Header:           make(http.Header),                                   // Копируем заголовки
-	// 	Body:             ioutil.NopCloser(bytes.NewBuffer(originalBodyData)), // Копируем тело
+	// 	Body:             io.NopCloser(bytes.NewBuffer(originalBodyData)), // Копируем тело
 	// 	ContentLength:    r.ContentLength,
 	// 	TransferEncoding: r.TransferEncoding,
 	// 	Close:            r.Close,
@@ -664,7 +663,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// printMemStats()
 
 	// _, _ = io.Copy(originalBodyHashStatic, r.Body)
-	// r.Body = ioutil.NopCloser(bytes.NewBuffer(originalBodyData))
+	// r.Body = io.NopCloser(bytes.NewBuffer(originalBodyData))
 
 	// TraceLogger.Println("Where:", "after r.Body copy back originalBodyData")
 	// printMemStats()
@@ -709,7 +708,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if dataCheckNeeded {
 		originalBodyHash = NewCountingHash(md5.New())
 		teereader := io.TeeReader(r.Body, originalBodyHash)
-		r.Body = ioutil.NopCloser(teereader)
+		r.Body = io.NopCloser(teereader)
 	}
 
 	TraceLogger.Println("Where:", "after originalBodyHash constructing")
@@ -735,7 +734,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if copyRequest == "" {
 			// это не PUT запрос для обновления метаданных (у него пустой Body) и включено шифрование, значит берем Body после шифрования
 			// Внимание, здесь мы читаем шифрованное тело в переменную, увеличивая занятую память на размер тела пакета
-			// innerRequestBodyData, err = ioutil.ReadAll(innerRequest.Body)
+			// innerRequestBodyData, err = io.ReadAll(innerRequest.Body)
 			// INFO: тяжелая операция, зависит от размера пакета
 			TraceLogger.Println("Where:", "before io.CopyBuffer(&innerRequestBodyData, ...")
 			// _, err := io.Copy(&innerRequestBodyData, innerRequest.Body)		// original copy
@@ -754,7 +753,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// 	return
 			// }
 
-			innerRequest.Body = ioutil.NopCloser(bytes.NewBuffer(innerRequestBodyData.Bytes()))
+			innerRequest.Body = io.NopCloser(bytes.NewBuffer(innerRequestBodyData.Bytes()))
 		}
 		TraceLogger.Println("Where:", "before h.SignRequestV4(innerRequestBodyData)")
 		// printMemStats()

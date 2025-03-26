@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
@@ -61,7 +60,7 @@ func UnserializeObjectMetadata(r io.Reader) (*ObjectMetadata, error) {
 		return nil, err
 	}
 
-	etag, err := ioutil.ReadAll(bufReader)
+	etag, err := io.ReadAll(bufReader)
 
 	if err != nil {
 		return nil, err
@@ -94,7 +93,7 @@ func (h *ProxyHandler) UpdateObjectMetadata(objectUrl *url.URL, metadata *Object
 		return err
 	}
 
-	encryptedMetadata, err := ioutil.ReadAll(encReader)
+	encryptedMetadata, err := io.ReadAll(encReader)
 
 	if err != nil {
 		return err
