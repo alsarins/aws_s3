@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var CurrentVersion string = "1.0.12"
+var CurrentVersion string = "1.0.13"
 
 func printMemStats() {
 	TraceLogger.Println("Where:", "printMemStats")
