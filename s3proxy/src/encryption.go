@@ -10,7 +10,13 @@ import (
 )
 
 func SetupCipher(info *BucketInfo, ivReader io.Reader) (cipher.Block, []byte, error) {
-	block, err := aes.NewCipher([]byte(info.Config.EncryptionKey))
+	keyHex := info.Config.EncryptionKey
+	keyBin, err := hex.DecodeString(keyHex)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	block, err := aes.NewCipher(keyBin)
 
 	if err != nil {
 		return nil, nil, err
