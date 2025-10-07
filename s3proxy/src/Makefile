@@ -1,10 +1,8 @@
 BINARY=s3proxy
 
-# Платформа по умолчанию (текущая)
 GOOS=$(shell go env GOOS)
 GOARCH=$(shell go env GOARCH)
 
-# Целевая платформа (Linux)
 TARGET_GOOS=linux
 TARGET_GOARCH=amd64
 
