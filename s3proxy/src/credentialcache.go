@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -36,7 +36,7 @@ func (c *CredentialCache) discoverInstanceRole() (string, error) {
 		return "", fmt.Errorf("Unexpected HTTP status code: %s", rsp.Status)
 	}
 
-	data, err := ioutil.ReadAll(rsp.Body)
+	data, err := io.ReadAll(rsp.Body)
 
 	if err != nil {
 		return "", fmt.Errorf("Error while reading HTTP response body: %s", err)
