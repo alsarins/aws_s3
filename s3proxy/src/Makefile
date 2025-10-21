@@ -28,8 +28,8 @@ build-linux:
 
 .PHONY: install
 install: build
-	mkdir -p $(DESTDIR)/usr/local/bin/
-	install -c -m 755 ./bin/$(BINARY) $(DESTDIR)/usr/local/bin/
+	sudo mkdir -p $(DESTDIR)/usr/local/bin/
+	sudo install -c -m 755 ./bin/$(BINARY) $(DESTDIR)/usr/local/bin/
 
 .PHONY: clean
 clean:
