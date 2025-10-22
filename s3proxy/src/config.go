@@ -11,6 +11,7 @@ type ServerConfig struct {
 	Port              uint16
 	DisableKeepAlives bool
 	AwsDomain         string
+	InsecureTLS       bool
 }
 
 type BucketConfig struct {
@@ -73,12 +74,10 @@ func parseConfig(filename string) (*Config, error) {
 			config.RetryDelay = 0
 		}
 
-		// Устанавливаем значение по умолчанию для Region, если оно не задано
 		if config.Region == "" {
 			config.Region = "us-west-1"
 		}
 
-		// Устанавливаем значение по умолчанию для Protocol, если оно не задано
 		if config.Protocol == "" {
 			config.Protocol = "https"
 		} else if config.Protocol != "" && (config.Protocol != "http" && config.Protocol != "https") {

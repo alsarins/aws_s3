@@ -16,10 +16,10 @@ import (
 )
 
 func calculateMD5Optimized(data []byte) string {
-	// calculateMD5Optimized — оптимизированная функция с буферизацией
+	// calculateMD5Optimized — function with buffering
 	hash := md5.New()
 	reader := bytes.NewReader(data)
-	buf := make([]byte, 32*1024) // 32KB буфер
+	buf := make([]byte, 32*1024) // 32KB buffer
 
 	for {
 		n, err := reader.Read(buf)
@@ -38,10 +38,10 @@ func calculateMD5Optimized(data []byte) string {
 }
 
 func calculateSHA256Optimized(data []byte) string {
-	// calculateSHA256Optimized — оптимизированная функция с буферизацией
+	// calculateSHA256Optimized — function with buffering
 	hash := sha256.New()
 	reader := bytes.NewReader(data)
-	buf := make([]byte, 32*1024) // 32KB буфер
+	buf := make([]byte, 32*1024) // 32KB buffer
 
 	for {
 		n, err := reader.Read(buf)
@@ -59,20 +59,8 @@ func calculateSHA256Optimized(data []byte) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-// func calculateSHA256(data string) string {
-// 	// оригинальное SHA256 хэширование в hex формате
-// 	hash := sha256.Sum256([]byte(data))
-// 	return hex.EncodeToString(hash[:])
-// }
-
-// func calculateMD5(data string) string {
-// 	// оригинальное MD5 хэширование в hex формате
-// 	hash := md5.Sum([]byte(data))
-// 	return base64.StdEncoding.EncodeToString(hash[:])
-// }
-
 func createSignedHeadersV4(headers http.Header) string {
-	// создание списка подписанных заголовков. Должны быть в lowercase, отсортированы по алфавиту, через ";"
+	// create list of signed header. Must be lowercased, sorted and delimited with ';'
 	var signedHeaders []string
 	for key := range headers {
 		signedHeaders = append(signedHeaders, strings.ToLower(key))
@@ -82,7 +70,7 @@ func createSignedHeadersV4(headers http.Header) string {
 }
 
 func createCanonicalHeadersV4(headers http.Header) string {
-	// создание канонических заголовков. Должны быть в lowercase и отсортированы по алфавиту, через ","
+	// create canonical headers. Must be lowercased, sorted and delimited with ';'
 	var canonicalHeaders []string
 	for key, values := range headers {
 		canonicalHeaders = append(canonicalHeaders, fmt.Sprintf("%s:%s", strings.ToLower(key), strings.Join(values, ",")))
@@ -92,7 +80,7 @@ func createCanonicalHeadersV4(headers http.Header) string {
 }
 
 func createCanonicalRequestV4(r *http.Request, payload []byte) string {
-	// создание канонического запроса
+	// create canonical request
 	// https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html#create-canonical-request
 
 	method := r.Method
