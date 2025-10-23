@@ -11,6 +11,8 @@ curl -u elastic -k -X PUT 'https://localhost:9200/_snapshot/s3_proxy?pretty' -H 
      "proxy.host": "127.0.0.1",
      "proxy.port": "18000",
      "disable_chunked_encoding": "true",
-     "max_retries": 0
+     "max_retries": 0,
+     "chunk_size": "20Mb",
+     "buffer_size": "20Mb"
    }
  }'
