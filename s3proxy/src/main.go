@@ -34,8 +34,8 @@ func startPprofServer() {
 	curl -o /tmp/mem.pprof http://localhost:6060/debug/pprof/heap
 	go tool pprof /tmp/mem.pprof
 
-	top — shows top memmory usage functions
-	list <function_name> — show memory for specific function
+	top - shows top memmory usage functions
+	list <function_name> - show memory for specific function
 	*/
 
 	go func() {
@@ -490,7 +490,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 	return nil
 }
 
-// signRequestWithConfig подписывает запрос с указанным конфигом
+// AWS sign request
 func (h *ProxyHandler) signRequestWithConfig(r *http.Request, config *BucketConfig, bodyData []byte, region string) error {
 	TraceLogger.Println("Where:", "signRequestWithConfig")
 
@@ -651,7 +651,6 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// read bucket configuration
 	info := h.GetBucketInfo(r)
 
-	// Обновленная логика логирования
 	if info == nil {
 		InfoLogger.Print("List buckets request (no specific bucket)")
 	} else if info.Config == nil {
