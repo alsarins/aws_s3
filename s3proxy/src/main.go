@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"net/url"
 	"os"
 	"runtime"
 	"sort"
@@ -19,7 +20,7 @@ import (
 	"time"
 )
 
-var CurrentVersion string = "1.0.14"
+var CurrentVersion string = "1.0.15"
 
 func printMemStats() {
 	TraceLogger.Println("Where:", "printMemStats")
@@ -84,7 +85,6 @@ func IsMultipartRequest(r *http.Request) bool {
 	}
 
 	return false
-
 }
 
 func (h *ProxyHandler) GetBucketSecurityCredentials(c *BucketConfig) (*Credentials, error) {
@@ -103,46 +103,81 @@ func (h *ProxyHandler) GetBucketSecurityCredentials(c *BucketConfig) (*Credentia
 func (h *ProxyHandler) GetBucketInfo(r *http.Request) *BucketInfo {
 	TraceLogger.Println("Where:", "GetBucketInfo")
 
-	requestHost := r.Host
-	configDomain := h.config.Server.AwsDomain
-
-	// workaround for hostname:port in configuration file
-	requestHostWithoutPort := requestHost
-	configDomainWithoutPort := configDomain
-
-	if idx := strings.Index(requestHost, ":"); idx != -1 {
-		requestHostWithoutPort = requestHost[:idx]
-	}
-	if idx := strings.Index(configDomain, ":"); idx != -1 {
-		configDomainWithoutPort = configDomain[:idx]
-	}
-
-	if requestHostWithoutPort != configDomainWithoutPort {
-		InfoLogger.Printf("Domain mismatch: request=%s, config=%s", requestHostWithoutPort, configDomainWithoutPort)
-		return nil
-	}
-
-	// if port is specified, use it for internal requests for corrent Host header
-
 	var bucketName string
 	var bucketVirtualHost bool
 
-	// bucket name identification
-	tokens := strings.Split(r.URL.Path, "/")
-	for _, t := range tokens {
-		if t == "" {
-			continue
-		}
-		bucketName = t
-		break
+	requestHost := r.Host
+	if idx := strings.Index(requestHost, ":"); idx != -1 {
+		requestHost = requestHost[:idx]
 	}
 
-	TraceLogger.Println("Where:", "end GetBucketInfo")
+	configDomain := h.config.Server.AwsDomain
+	if idx := strings.Index(configDomain, ":"); idx != -1 {
+		configDomain = configDomain[:idx]
+	}
+
+	TraceLogger.Printf("GetBucketInfo DEBUG: requestHost='%s', configDomain='%s'", requestHost, configDomain)
+
+	// check virtual host style
+	isExplicitVirtualHost := false
+	if idx := strings.Index(requestHost, "."); idx != -1 {
+		potentialBucket := requestHost[:idx]
+		if !isIPAddress(potentialBucket) && potentialBucket != configDomain && requestHost != configDomain {
+			bucketName = potentialBucket
+			bucketVirtualHost = true
+			isExplicitVirtualHost = true
+			InfoLogger.Printf("Explicit virtual host style - bucket: %s", bucketName)
+		}
+	}
+
+	// use path style if not virtual host style
+	if !isExplicitVirtualHost {
+		tokens := strings.Split(r.URL.Path, "/")
+		for _, t := range tokens {
+			if t == "" {
+				continue
+			}
+			bucketName = t
+			break
+		}
+		if bucketName != "" {
+			InfoLogger.Printf("Path style - bucket: %s", bucketName)
+		}
+	}
+
+	if bucketName == "" {
+		InfoLogger.Printf("List buckets request")
+		return &BucketInfo{
+			Name:        "",
+			VirtualHost: false,
+			Config:      nil,
+		}
+	}
+
+	config := h.config.Buckets[bucketName]
+	if config == nil {
+		InfoLogger.Printf("Bucket '%s' not in config, but allowing request", bucketName)
+		return &BucketInfo{
+			Name:        bucketName,
+			VirtualHost: bucketVirtualHost,
+			Config:      nil,
+		}
+	}
+
 	return &BucketInfo{
 		Name:        bucketName,
 		VirtualHost: bucketVirtualHost,
-		Config:      h.config.Buckets[bucketName],
+		Config:      config,
 	}
+}
+
+func isIPAddress(s string) bool {
+	for _, r := range s {
+		if !(r >= '0' && r <= '9') && r != '.' {
+			return false
+		}
+	}
+	return strings.Contains(s, ".")
 }
 
 func (h *ProxyHandler) PreRequestEncryptionHook(r *http.Request, innerRequest *http.Request, info *BucketInfo) (*CountingHash, error) {
@@ -190,31 +225,49 @@ func (h *ProxyHandler) PreRequestEncryptionHook(r *http.Request, innerRequest *h
 
 func (h *ProxyHandler) PostRequestEncryptionHook(r *http.Request, innerResponse *http.Response, info *BucketInfo) (io.ReadCloser, error) {
 	TraceLogger.Println("Where:", "PostRequestEncryptionHook")
-	// for PUT requests: we do not have response body, we expect to recieve correct StatusCode and Etag header
-	// for GET requests: we expect to return decrypted Body of file
 
-	// if encryption is disabled, then return original request Body
-	if info == nil || info.Config == nil || info.Config.EncryptionKey == "" {
+	// incoming parameters DEBUG
+	if info == nil {
+		TraceLogger.Printf("PostRequestEncryptionHook: info is nil")
+	} else {
+		TraceLogger.Printf("PostRequestEncryptionHook: bucket=%s, config=%v", info.Name, info.Config != nil)
+	}
+
+	// check for list requests, even no bucket configured
+	isListRequest := strings.HasSuffix(r.URL.Path, "/") ||
+		strings.Contains(r.URL.RawQuery, "list-type=") ||
+		strings.Contains(r.URL.RawQuery, "delimiter=") ||
+		strings.Contains(r.URL.RawQuery, "prefix=") ||
+		r.URL.Path == "/" // root path - list buckets
+		//		(innerResponse != nil && innerResponse.Header.Get("Content-Type") == "application/xml")
+
+	if isListRequest {
+		TraceLogger.Printf("List request detected (path=%s, query=%s), skipping processing", r.URL.Path, r.URL.RawQuery)
+		return innerResponse.Body, nil
+	}
+
+	if info == nil || info.Config == nil {
+		TraceLogger.Printf("PostRequestEncryptionHook: no bucket config, returning original response")
+		return innerResponse.Body, nil
+	}
+
+	// if encryption disabled for bucket
+	if info.Config.EncryptionKey == "" {
+		TraceLogger.Printf("PostRequestEncryptionHook: encryption disabled for bucket")
 		return innerResponse.Body, nil
 	}
 
 	if r.Method != "GET" && r.Method != "HEAD" {
 		// for PUT and POST requests: return original request Body
+		TraceLogger.Printf("PostRequestEncryptionHook: not GET/HEAD method")
 		return innerResponse.Body, nil
 	}
 
 	if innerResponse.StatusCode >= 300 {
+		TraceLogger.Printf("PostRequestEncryptionHook: status code >= 300")
 		return innerResponse.Body, nil
 	}
 
-	// When listing folders, the returned data is not going to be encrypted
-	if strings.HasSuffix(r.URL.Path, "/") {
-		InfoLogger.Print("Directory listing request, skipping decryption")
-		return innerResponse.Body, nil
-	}
-
-	// TODO: add metadata check. It metadata contains data for decrypting, then this is trigger for decryption
-	// Otherwise the next steps could produce garbage in response
 	InfoLogger.Print("Decrypting the response")
 
 	// If we had cached encrypted metadata, decrypt it and return it to the client
@@ -272,17 +325,30 @@ func IsValidXML(data []byte) bool {
 
 func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData []byte) error {
 	TraceLogger.Println("Where:", "SignRequestV4")
-	// https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-auth-using-authorization-header.html
 
-	// exit if we do not have information about bucket. This is possible in case of HTTP request other than GET/PUT/POST - we skip them
-	// or in case of malformed URL
-	if info == nil || info.Config == nil {
+	// DEBUG
+	if info == nil {
+		TraceLogger.Printf("SignRequestV4: info is nil - cannot sign request")
 		return nil
 	}
 
-	// TODO: make bodyData an optional parameter.
-	// if we do not have bodyData here, then get one from request.
-	// This is possible in case of metadata request.
+	TraceLogger.Printf("SignRequestV4: signing request for bucket=%s, hasConfig=%v", info.Name, info.Config != nil)
+
+	// use credentials from first configured bucket, if bucket not found in config
+	if info.Config == nil {
+		TraceLogger.Printf("SignRequestV4: bucket '%s' not in config, looking for default credentials", info.Name)
+
+		if len(h.config.Buckets) > 0 {
+			for _, bucketConfig := range h.config.Buckets {
+				TraceLogger.Printf("SignRequestV4: using credentials from configured bucket for '%s'", info.Name)
+				// use us-east-1 for non configured buckets
+				return h.signRequestWithConfig(r, bucketConfig, bodyData, "us-east-1")
+			}
+		} else {
+			TraceLogger.Printf("SignRequestV4: no buckets in config, cannot sign request for '%s'", info.Name)
+			return fmt.Errorf("no credentials available for bucket '%s'", info.Name)
+		}
+	}
 
 	// check if we have credentials configured
 	credentials, err := h.GetBucketSecurityCredentials(info.Config)
@@ -311,8 +377,6 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 	// add Content-Type, Content-Length, Content-Md5 for POST requests
 	if r.Method == "POST" {
 		if content_type == "" {
-			// we expect plain text in POST requests. If this is octet-stream or other type - there might be a problem here.
-			// TODO: add checks and change to []byte if neccessary
 			content_type = "text/plain"
 			if len(bodyData) > 0 {
 				if IsValidXML(bodyData) {
@@ -376,7 +440,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 		canonicalizedAmzHeaders.WriteString("\n")
 	}
 
-	// ass Host header
+	// add Host header
 	r.Header.Set("Host", r.URL.Host)
 
 	TraceLogger.Println("Where:", "before createCanonicalRequestV4")
@@ -426,6 +490,119 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 	return nil
 }
 
+// signRequestWithConfig подписывает запрос с указанным конфигом
+func (h *ProxyHandler) signRequestWithConfig(r *http.Request, config *BucketConfig, bodyData []byte, region string) error {
+	TraceLogger.Println("Where:", "signRequestWithConfig")
+
+	credentials := &Credentials{
+		AccessKeyId:     config.AccessKeyId,
+		SecretAccessKey: config.SecretAccessKey,
+	}
+
+	if region == "" {
+		region = "us-east-1"
+	}
+	service := "s3"
+
+	TraceLogger.Println("Where:", "signRequestWithConfig 1")
+	// AWS signature V4 canonical request
+	headers_to_ignore := []string{"authorization", "connection", "x-amzn-trace-id", "user-agent", "expect", "presigned-expires", "range", "proxy-connection", "accept-encoding"}
+
+	for _, header_to_remove := range headers_to_ignore {
+		r.Header.Del(header_to_remove)
+	}
+
+	TraceLogger.Println("Where:", "before adding headers")
+	content_type := r.Header.Get("Content-Type")
+	content_length := r.Header.Get("Content-Length")
+
+	TraceLogger.Println("Where:", "before adding Content-Type, Content-Length, Content-Md5")
+	if r.Method == "POST" {
+		if content_type == "" {
+			content_type = "text/plain"
+			if len(bodyData) > 0 {
+				if IsValidXML(bodyData) {
+					content_type = "application/xml"
+				}
+			}
+			r.Header.Set("Content-Type", content_type)
+		}
+
+		if content_length == "" {
+			content_length = fmt.Sprint(len(bodyData))
+			r.Header.Set("Content-Length", content_length)
+		}
+
+		content_md5 := r.Header.Get("Content-Md5")
+		if content_md5 == "" {
+			content_md5 = calculateMD5Optimized(bodyData)
+			r.Header.Set("Content-Md5", content_md5)
+		}
+	}
+
+	TraceLogger.Println("Where:", "after adding Content-Type, Content-Length, Content-Md5")
+
+	amazonDate := r.Header.Get("Date")
+	if amazonDate == "" && r.Header.Get("x-amz-date") == "" {
+		amazonDate = time.Now().UTC().Format("20060102T150405Z")
+		r.Header.Set("Date", amazonDate)
+	}
+
+	TraceLogger.Println("Where:", "before X-Amz-Content-Sha256")
+	r.Header.Set("X-Amz-Content-Sha256", calculateSHA256Optimized(bodyData))
+	TraceLogger.Println("Where:", "after X-Amz-Content-Sha256")
+
+	if credentials.Token != "" {
+		r.Header.Add("x-amz-security-token", credentials.Token)
+	}
+
+	canonicalizedAmzHeaders := bytes.NewBuffer(nil)
+	amzHeaders := []string{}
+
+	for k := range r.Header {
+		if !strings.HasPrefix(strings.ToLower(k), "x-amz-") {
+			continue
+		}
+		amzHeaders = append(amzHeaders, k)
+	}
+
+	sort.Strings(amzHeaders)
+
+	for _, k := range amzHeaders {
+		canonicalizedAmzHeaders.WriteString(strings.ToLower(k))
+		canonicalizedAmzHeaders.WriteString(":")
+		canonicalizedAmzHeaders.WriteString(strings.Join(r.Header[k], ","))
+		canonicalizedAmzHeaders.WriteString("\n")
+	}
+
+	r.Header.Set("Host", r.URL.Host)
+
+	TraceLogger.Println("Where:", "before createCanonicalRequestV4")
+	canonicalRequest := createCanonicalRequestV4(r, bodyData)
+
+	TraceLogger.Println("Where:", "before createStringToSignV4")
+	stringToSign := createStringToSignV4(r, canonicalRequest, region, service)
+
+	TraceLogger.Println("Where:", "before getSigningKey")
+	signingKey := getSigningKey(credentials.SecretAccessKey, r.Header.Get("X-Amz-Date")[:8], region, service)
+
+	TraceLogger.Println("Where:", "before calculateSignatureV4")
+	signature_v4 := calculateSignatureV4(signingKey, stringToSign)
+
+	TraceLogger.Println("Where:", "before Authorization header")
+	r.Header.Set("Authorization", fmt.Sprintf("AWS4-HMAC-SHA256 Credential=%s/%s/%s/%s/aws4_request, SignedHeaders=%s, Signature=%s",
+		credentials.AccessKeyId,
+		r.Header.Get("X-Amz-Date")[:8],
+		region,
+		service,
+		createSignedHeadersV4(r.Header),
+		signature_v4,
+	))
+
+	TraceLogger.Println("Where:", "end signRequestWithConfig")
+	return nil
+}
+
 func connectResponseOK(w http.ResponseWriter, format string, args ...interface{}) {
 	// return 200 OK, if whis is CONNECT method (for https and proxy authentication)
 	// we do not support auth yet
@@ -471,21 +648,17 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// read bucket configration
+	// read bucket configuration
 	info := h.GetBucketInfo(r)
 
+	// Обновленная логика логирования
 	if info == nil {
-		InfoLogger.Print("Not an S3 request")
+		InfoLogger.Print("List buckets request (no specific bucket)")
+	} else if info.Config == nil {
+		InfoLogger.Printf("Handling request for unconfigured bucket: %s", info.Name)
 	} else {
-		if info.Config == nil {
-			InfoLogger.Printf("No configuration for S3 bucket %s", info.Name)
-		} else {
-			InfoLogger.Printf("Handling request for bucket %s", info.Name)
-		}
+		InfoLogger.Printf("Handling request for configured bucket: %s", info.Name)
 	}
-
-	// TraceLogger.Println("Where:", "before originalBodyData")
-	// printMemStats()
 
 	defer r.Body.Close() // force to close body if error happens
 
@@ -501,64 +674,81 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		failRequest(w, http.StatusInternalServerError, "Failed to read original request body: %s", err)
 		return
 	}
-	// _, _ = io.Copy(io.Discard, teereader)		// original copy
 	TraceLogger.Println("Where:", "after originalBodyData copy")
 
 	// restore r.Body for further usage
 	r.Body = io.NopCloser(&originalBodyData)
 
 	TraceLogger.Println("Where:", "after r.Body copy back")
-	// TraceLogger.Println("Where:", "after r.Body copy back originalBodyData")
-	// printMemStats()
 
+	// DEBUG incoming request
+	TraceLogger.Printf("INCOMING REQUEST: Method=%s, URL=%s, Proto=%s, Host=%s, TLS=%v",
+		r.Method, r.URL.String(), r.Proto, r.Host, r.TLS != nil)
+
+	// always replace r.Host with configured AwsDomain
 	innerRequest := &http.Request{
 		Method:           r.Method,
 		URL:              r.URL,
 		Proto:            r.Proto,
 		ProtoMajor:       r.ProtoMajor,
 		ProtoMinor:       r.ProtoMinor,
-		Header:           r.Header,
+		Header:           r.Header.Clone(),
 		Body:             r.Body,
 		ContentLength:    r.ContentLength,
 		TransferEncoding: r.TransferEncoding,
 		Close:            r.Close,
-		Host:             r.Host,
+		Host:             h.config.Server.AwsDomain,
 		Form:             r.Form,
 		PostForm:         r.PostForm,
 		MultipartForm:    r.MultipartForm,
 		Trailer:          r.Trailer,
 	}
 
+	innerRequest.URL.Host = h.config.Server.AwsDomain
+	innerRequest.Header.Set("Host", h.config.Server.AwsDomain)
+
+	// convert virtual host style to path style for external requests to s3
+	if info != nil && info.VirtualHost && info.Name != "" {
+		if innerRequest.URL.Path == "/" || innerRequest.URL.Path == "" {
+			innerRequest.URL.Path = "/" + info.Name + "/"
+			InfoLogger.Printf("Virtual host to path style: / -> /%s/", info.Name)
+		} else if !strings.HasPrefix(innerRequest.URL.Path, "/"+info.Name) {
+			innerRequest.URL.Path = "/" + info.Name + innerRequest.URL.Path
+			InfoLogger.Printf("Virtual host to path style: %s -> %s", r.URL.Path, innerRequest.URL.Path)
+		}
+	}
+
 	TraceLogger.Println("Where:", "before innerRequest.URL.Scheme")
 
-	// workaround for hostname:port in AwsDomain here
-	if info == nil || info.Config == nil {
+	if info == nil {
+		// use https if bucket non defined (list for example)
 		innerRequest.URL.Scheme = "https"
-		if idx := strings.Index(h.config.Server.AwsDomain, ":"); idx != -1 {
-			innerRequest.URL.Host = h.config.Server.AwsDomain
-		} else {
-			innerRequest.URL.Host = r.Host
-		}
+		TraceLogger.Printf("Using default HTTPS scheme for request without bucket")
+	} else if info.Config == nil {
+		// use https if bucket defined but not in config file
+		innerRequest.URL.Scheme = "https"
+		TraceLogger.Printf("Using default HTTPS scheme for unconfigured bucket: %s", info.Name)
 	} else {
+		// use schema if configured for bucket
 		innerRequest.URL.Scheme = info.Config.Protocol
-		if idx := strings.Index(h.config.Server.AwsDomain, ":"); idx != -1 {
-			innerRequest.URL.Host = h.config.Server.AwsDomain
-		} else {
-			innerRequest.URL.Host = r.Host
-		}
+		TraceLogger.Printf("Using configured scheme %s for bucket: %s", info.Config.Protocol, info.Name)
+	}
+
+	// DEBUG outgoing request
+	TraceLogger.Printf("OUTGOING TO S3: URL=%s, Scheme=%s, Host=%s",
+		innerRequest.URL.String(), innerRequest.URL.Scheme, innerRequest.Host)
+
+	if innerRequest.URL.Host != h.config.Server.AwsDomain {
+		ErrorLogger.Printf("URL HOST MISMATCH: expected=%s, actual=%s",
+			h.config.Server.AwsDomain, innerRequest.URL.Host)
 	}
 
 	TraceLogger.Println("Where:", "after innerRequest.URL.Scheme")
 
-	innerRequest.URL.Host = r.Host
-
-	TraceLogger.Println("Where:", "after innerRequest constructing")
-	// printMemStats()
-
 	var originalBodyHash *CountingHash
 
 	// we need to encrypt and replace md5 hashes in case of PUT requests
-	dataCheckNeeded := r.Method == "PUT" && info != nil
+	dataCheckNeeded := r.Method == "PUT" && info != nil && info.Config != nil
 
 	if dataCheckNeeded {
 		originalBodyHash = NewCountingHash(md5.New())
@@ -567,13 +757,11 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	TraceLogger.Println("Where:", "after originalBodyHash constructing")
-	// printMemStats()
 
 	// encrypt Body if enabled in config file
 	innerBodyHash, err := h.PreRequestEncryptionHook(r, innerRequest, info)
 
 	TraceLogger.Println("Where:", "after PreRequestEncryptionHook")
-	// printMemStats()
 
 	if err != nil {
 		failRequest(w, http.StatusInternalServerError, "Error while setting up encryption: %s", err)
@@ -582,13 +770,12 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var innerRequestBodyData bytes.Buffer
 
-	if info.Config != nil && info.Config.EncryptionKey != "" {
-		// we need to sign encrypted Body, instead of orignal one, if encryption is enabled
+	// check encryption needed
+	if info != nil && info.Config != nil && info.Config.EncryptionKey != "" {
+		// encryption enabled for bucket
 		copyRequest := innerRequest.Header.Get("x-amz-copy-source")
 		if copyRequest == "" {
-			// this is not PUT request for metadata update, so we need to take encrypted Body
 			TraceLogger.Println("Where:", "before io.CopyBuffer(&innerRequestBodyData, ...")
-			// _, err := io.Copy(&innerRequestBodyData, innerRequest.Body)		// original copy
 			buf := make([]byte, 1<<20) // 1MB buffer
 			_, err := io.CopyBuffer(&innerRequestBodyData, innerRequest.Body, buf)
 			if err != nil {
@@ -600,17 +787,14 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			innerRequest.Body = io.NopCloser(bytes.NewBuffer(innerRequestBodyData.Bytes()))
 		}
 		TraceLogger.Println("Where:", "before h.SignRequestV4(innerRequestBodyData)")
-		// printMemStats()
 		err = h.SignRequestV4(innerRequest, info, innerRequestBodyData.Bytes())
 	} else {
-		// use origina Body for signing, if encryption is not enabled
+		// no encryption enabled or bucket is not configured
 		TraceLogger.Println("Where:", "before h.SignRequestV4(originalBodyData)")
-		// printMemStats()
 		err = h.SignRequestV4(innerRequest, info, originalBodyData.Bytes())
 	}
 
 	TraceLogger.Println("Where:", "after h.SignRequestV4")
-	// printMemStats()
 
 	if err != nil {
 		failRequest(w, http.StatusInternalServerError, "Error while signing the request: %s", err)
@@ -632,7 +816,19 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for {
 		TraceLogger.Println("Where:", "before h.client.Do(innerRequest)")
 		// send request to s3 server
+		// debug before sending request
+		TraceLogger.Printf("BEFORE client.Do: URL=%s, Method=%s",
+			innerRequest.URL.String(), innerRequest.Method)
+
 		innerResponse, err = h.client.Do(innerRequest)
+		// check response
+		if err != nil {
+			InfoLogger.Printf("ERROR IN client.Do: %v", err)
+			if urlErr, ok := err.(*url.Error); ok {
+				InfoLogger.Printf("URL ERROR: Op=%s, URL=%s", urlErr.Op, urlErr.URL)
+			}
+		}
+
 		TraceLogger.Println("Where:", "after h.client.Do(innerRequest)")
 
 		if err != nil {
@@ -732,6 +928,9 @@ func NewProxyHandler(config *Config) *ProxyHandler {
 	// disable TLS check if InsecureTLS is enabled
 	if config.Server.InsecureTLS {
 		tlsConfig.InsecureSkipVerify = true
+		InfoLogger.Printf("TLS certificate verification is DISABLED (InsecureTLS=true)")
+	} else {
+		InfoLogger.Printf("TLS certificate verification is enabled")
 	}
 
 	transport := &http.Transport{
