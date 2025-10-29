@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-var CurrentVersion string = "1.0.15"
+var CurrentVersion string = "1.0.16"
 
 func printMemStats() {
 	TraceLogger.Println("Where:", "printMemStats")
@@ -211,6 +211,9 @@ func (h *ProxyHandler) PreRequestEncryptionHook(r *http.Request, innerRequest *h
 	innerBodyHash := NewCountingHash(md5.New())
 	teereader := io.TeeReader(encryptedInput, innerBodyHash)
 	innerRequest.Body = io.NopCloser(teereader)
+
+	// remove Content-Md5 from headers, bacause encryption is changing Body
+	innerRequest.Header.Del("Content-Md5")
 
 	if length := innerRequest.ContentLength; length != -1 {
 		innerRequest.ContentLength += extralen
