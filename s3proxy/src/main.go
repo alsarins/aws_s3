@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/md5"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/xml"
 	"flag"
 	"fmt"
@@ -337,6 +338,9 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 
 	TraceLogger.Printf("SignRequestV4: signing request for bucket=%s, hasConfig=%v", info.Name, info.Config != nil)
 
+	var credentials *Credentials
+	var region string
+
 	// use credentials from first configured bucket, if bucket not found in config
 	if info.Config == nil {
 		TraceLogger.Printf("SignRequestV4: bucket '%s' not in config, looking for default credentials", info.Name)
@@ -345,24 +349,40 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 			for _, bucketConfig := range h.config.Buckets {
 				TraceLogger.Printf("SignRequestV4: using credentials from configured bucket for '%s'", info.Name)
 				// use us-east-1 for non configured buckets
-				return h.signRequestWithConfig(r, bucketConfig, bodyData, "us-east-1")
+				credentials = &Credentials{
+					AccessKeyId:     bucketConfig.AccessKeyId,
+					SecretAccessKey: bucketConfig.SecretAccessKey,
+				}
+				region = "us-east-1"
+				break
 			}
 		} else {
 			TraceLogger.Printf("SignRequestV4: no buckets in config, cannot sign request for '%s'", info.Name)
 			return fmt.Errorf("no credentials available for bucket '%s'", info.Name)
 		}
+	} else {
+		// check if we have credentials configured
+		var err error
+		credentials, err = h.GetBucketSecurityCredentials(info.Config)
+		if err != nil {
+			return err
+		}
+		region = info.Config.Region
 	}
 
-	// check if we have credentials configured
-	credentials, err := h.GetBucketSecurityCredentials(info.Config)
-	if err != nil {
-		return err
+	return h.signRequestInternal(r, credentials, region, bodyData)
+}
+
+// Internal signing function
+func (h *ProxyHandler) signRequestInternal(r *http.Request, credentials *Credentials, region string, bodyData []byte) error {
+	TraceLogger.Println("Where:", "signRequestInternal")
+
+	if region == "" {
+		region = "us-east-1"
 	}
+	service := "s3"
 
-	region := info.Config.Region
-	service := "s3" // should not be changed
-
-	TraceLogger.Println("Where:", "SignRequestV4 1")
+	TraceLogger.Println("Where:", "signRequestInternal 1")
 	// AWS signature V4 canonical request
 	// first - remove unnecessary headers
 	headers_to_ignore := []string{"authorization", "connection", "x-amzn-trace-id", "user-agent", "expect", "presigned-expires", "range", "proxy-connection", "accept-encoding"}
@@ -399,7 +419,6 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 			content_md5 = calculateMD5Optimized(bodyData)
 			r.Header.Set("Content-Md5", content_md5)
 		}
-
 	}
 
 	TraceLogger.Println("Where:", "after adding Content-Type, Content-Length, Content-Md5")
@@ -416,7 +435,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 	r.Header.Set("X-Amz-Content-Sha256", calculateSHA256Optimized(bodyData))
 	TraceLogger.Println("Where:", "after X-Amz-Content-Sha256")
 
-	// adding x-amz-security-token (do not know exactly is it usefull)
+	// adding x-amz-security-token
 	if credentials.Token != "" {
 		r.Header.Add("x-amz-security-token", credentials.Token)
 	}
@@ -430,7 +449,6 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 		if !strings.HasPrefix(strings.ToLower(k), "x-amz-") {
 			continue
 		}
-
 		amzHeaders = append(amzHeaders, k)
 	}
 
@@ -447,36 +465,32 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 	r.Header.Set("Host", r.URL.Host)
 
 	TraceLogger.Println("Where:", "before createCanonicalRequestV4")
-	// step 1: create cannical request
+	// step 1: create canonical request
 	canonicalRequest := createCanonicalRequestV4(r, bodyData)
 
-	// DEBUG
-	// TraceLogger.Printf("Canonical Request:\n%s\n", canonicalRequest)
-	// TraceLogger.Println("----------------------------------------------")
+	TraceLogger.Printf("Canonical Request:\n%s\n", canonicalRequest)
+	TraceLogger.Println("----------------------------------------------")
 
 	TraceLogger.Println("Where:", "before createStringToSignV4")
 	// step 2: create string to sign
 	stringToSign := createStringToSignV4(r, canonicalRequest, region, service)
 
-	// DEBUG
-	// TraceLogger.Printf("StringToSign:\n%s\n", stringToSign)
-	// TraceLogger.Println("----------------------------------------------")
+	TraceLogger.Printf("StringToSign:\n%s\n", stringToSign)
+	TraceLogger.Println("----------------------------------------------")
 
 	TraceLogger.Println("Where:", "before getSigningKey")
 	// step 3: calculate key for signature
 	signingKey := getSigningKey(credentials.SecretAccessKey, r.Header.Get("X-Amz-Date")[:8], region, service)
 
-	// DEBUG
-	// TraceLogger.Printf("signingKey:%s\n", hex.EncodeToString(signingKey))
-	// TraceLogger.Println("----------------------------------------------")
+	TraceLogger.Printf("signingKey:%s\n", hex.EncodeToString(signingKey))
+	TraceLogger.Println("----------------------------------------------")
 
 	TraceLogger.Println("Where:", "before calculateSignatureV4")
-	// step 5: calcalate signature, based on key and string to sign
+	// step 4: calculate signature, based on key and string to sign
 	signature_v4 := calculateSignatureV4(signingKey, stringToSign)
 
-	// DEBUG
-	// TraceLogger.Printf("signature:%s\n", signature_v4)
-	// TraceLogger.Println("----------------------------------------------")
+	TraceLogger.Printf("signature:%s\n", signature_v4)
+	TraceLogger.Println("----------------------------------------------")
 
 	TraceLogger.Println("Where:", "before Authorization header")
 	// add Authorization header
@@ -489,120 +503,7 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 		signature_v4,
 	))
 
-	TraceLogger.Println("Where:", "end SignRequestV4")
-	return nil
-}
-
-// AWS sign request
-func (h *ProxyHandler) signRequestWithConfig(r *http.Request, config *BucketConfig, bodyData []byte, region string) error {
-	TraceLogger.Println("Where:", "signRequestWithConfig")
-
-	credentials := &Credentials{
-		AccessKeyId:     config.AccessKeyId,
-		SecretAccessKey: config.SecretAccessKey,
-	}
-
-	if region == "" {
-		region = "us-east-1"
-	}
-	service := "s3"
-
-	TraceLogger.Println("Where:", "signRequestWithConfig 1")
-	// AWS signature V4 canonical request
-	headers_to_ignore := []string{"authorization", "connection", "x-amzn-trace-id", "user-agent", "expect", "presigned-expires", "range", "proxy-connection", "accept-encoding"}
-
-	for _, header_to_remove := range headers_to_ignore {
-		r.Header.Del(header_to_remove)
-	}
-
-	TraceLogger.Println("Where:", "before adding headers")
-	content_type := r.Header.Get("Content-Type")
-	content_length := r.Header.Get("Content-Length")
-
-	TraceLogger.Println("Where:", "before adding Content-Type, Content-Length, Content-Md5")
-	if r.Method == "POST" {
-		if content_type == "" {
-			content_type = "text/plain"
-			if len(bodyData) > 0 {
-				if IsValidXML(bodyData) {
-					content_type = "application/xml"
-				}
-			}
-			r.Header.Set("Content-Type", content_type)
-		}
-
-		if content_length == "" {
-			content_length = fmt.Sprint(len(bodyData))
-			r.Header.Set("Content-Length", content_length)
-		}
-
-		content_md5 := r.Header.Get("Content-Md5")
-		if content_md5 == "" {
-			content_md5 = calculateMD5Optimized(bodyData)
-			r.Header.Set("Content-Md5", content_md5)
-		}
-	}
-
-	TraceLogger.Println("Where:", "after adding Content-Type, Content-Length, Content-Md5")
-
-	amazonDate := r.Header.Get("Date")
-	if amazonDate == "" && r.Header.Get("x-amz-date") == "" {
-		amazonDate = time.Now().UTC().Format("20060102T150405Z")
-		r.Header.Set("Date", amazonDate)
-	}
-
-	TraceLogger.Println("Where:", "before X-Amz-Content-Sha256")
-	r.Header.Set("X-Amz-Content-Sha256", calculateSHA256Optimized(bodyData))
-	TraceLogger.Println("Where:", "after X-Amz-Content-Sha256")
-
-	if credentials.Token != "" {
-		r.Header.Add("x-amz-security-token", credentials.Token)
-	}
-
-	canonicalizedAmzHeaders := bytes.NewBuffer(nil)
-	amzHeaders := []string{}
-
-	for k := range r.Header {
-		if !strings.HasPrefix(strings.ToLower(k), "x-amz-") {
-			continue
-		}
-		amzHeaders = append(amzHeaders, k)
-	}
-
-	sort.Strings(amzHeaders)
-
-	for _, k := range amzHeaders {
-		canonicalizedAmzHeaders.WriteString(strings.ToLower(k))
-		canonicalizedAmzHeaders.WriteString(":")
-		canonicalizedAmzHeaders.WriteString(strings.Join(r.Header[k], ","))
-		canonicalizedAmzHeaders.WriteString("\n")
-	}
-
-	r.Header.Set("Host", r.URL.Host)
-
-	TraceLogger.Println("Where:", "before createCanonicalRequestV4")
-	canonicalRequest := createCanonicalRequestV4(r, bodyData)
-
-	TraceLogger.Println("Where:", "before createStringToSignV4")
-	stringToSign := createStringToSignV4(r, canonicalRequest, region, service)
-
-	TraceLogger.Println("Where:", "before getSigningKey")
-	signingKey := getSigningKey(credentials.SecretAccessKey, r.Header.Get("X-Amz-Date")[:8], region, service)
-
-	TraceLogger.Println("Where:", "before calculateSignatureV4")
-	signature_v4 := calculateSignatureV4(signingKey, stringToSign)
-
-	TraceLogger.Println("Where:", "before Authorization header")
-	r.Header.Set("Authorization", fmt.Sprintf("AWS4-HMAC-SHA256 Credential=%s/%s/%s/%s/aws4_request, SignedHeaders=%s, Signature=%s",
-		credentials.AccessKeyId,
-		r.Header.Get("X-Amz-Date")[:8],
-		region,
-		service,
-		createSignedHeadersV4(r.Header),
-		signature_v4,
-	))
-
-	TraceLogger.Println("Where:", "end signRequestWithConfig")
+	TraceLogger.Println("Where:", "end signRequestInternal")
 	return nil
 }
 
