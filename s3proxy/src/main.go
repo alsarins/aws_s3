@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-var CurrentVersion string = "1.0.16"
+var CurrentVersion string = "1.0.17"
 
 func printMemStats() {
 	TraceLogger.Println("Where:", "printMemStats")
@@ -32,11 +32,11 @@ func printMemStats() {
 
 func startPprofServer() {
 	/* localhost:6060 is for profiling memory consumption (PPROF) for debug
-	curl -o /tmp/mem.pprof http://localhost:6060/debug/pprof/heap
-	go tool pprof /tmp/mem.pprof
+	   curl -o /tmp/mem.pprof http://localhost:6060/debug/pprof/heap
+	   go tool pprof /tmp/mem.pprof
 
-	top - shows top memmory usage functions
-	list <function_name> - show memory for specific function
+	   top - shows top memmory usage functions
+	   list <function_name> - show memory for specific function
 	*/
 
 	go func() {
@@ -174,7 +174,7 @@ func (h *ProxyHandler) GetBucketInfo(r *http.Request) *BucketInfo {
 
 func isIPAddress(s string) bool {
 	for _, r := range s {
-		if !(r >= '0' && r <= '9') && r != '.' {
+		if (r < '0' || r > '9') && r != '.' {
 			return false
 		}
 	}
@@ -243,10 +243,10 @@ func (h *ProxyHandler) PostRequestEncryptionHook(r *http.Request, innerResponse 
 		strings.Contains(r.URL.RawQuery, "delimiter=") ||
 		strings.Contains(r.URL.RawQuery, "prefix=") ||
 		r.URL.Path == "/" // root path - list buckets
-		//		(innerResponse != nil && innerResponse.Header.Get("Content-Type") == "application/xml")
+		//      (innerResponse != nil && innerResponse.Header.Get("Content-Type") == "application/xml")
 
 	if isListRequest {
-		TraceLogger.Printf("List request detected (path=%s, query=%s), skipping processing", r.URL.Path, r.URL.RawQuery)
+		TraceLogger.Printf("List request detected (path=%s, query=%s), skipping PostRequestEncryptionHook processing, returning original response", r.URL.Path, r.URL.RawQuery)
 		return innerResponse.Body, nil
 	}
 
@@ -307,12 +307,14 @@ func (h *ProxyHandler) PostRequestEncryptionHook(r *http.Request, innerResponse 
 	}
 
 	decryptedReader, minuslen, err := SetupReadEncryption(innerResponse.Body, info)
-
 	if err != nil {
 		return nil, err
 	}
-
-	defer decryptedReader.Close()
+	defer func() {
+		if closeErr := decryptedReader.Close(); closeErr != nil {
+			ErrorLogger.Printf("Error closing decrypted reader: %v", closeErr)
+		}
+	}()
 
 	if length := innerResponse.ContentLength; length != -1 {
 		innerResponse.ContentLength -= minuslen
@@ -348,12 +350,12 @@ func (h *ProxyHandler) SignRequestV4(r *http.Request, info *BucketInfo, bodyData
 		if len(h.config.Buckets) > 0 {
 			for _, bucketConfig := range h.config.Buckets {
 				TraceLogger.Printf("SignRequestV4: using credentials from configured bucket for '%s'", info.Name)
-				// use us-east-1 for non configured buckets
 				credentials = &Credentials{
 					AccessKeyId:     bucketConfig.AccessKeyId,
 					SecretAccessKey: bucketConfig.SecretAccessKey,
 				}
-				region = "us-east-1"
+				// use region for non configured buckets
+				region = bucketConfig.Region
 				break
 			}
 		} else {
@@ -389,6 +391,12 @@ func (h *ProxyHandler) signRequestInternal(r *http.Request, credentials *Credent
 
 	for _, header_to_remove := range headers_to_ignore {
 		r.Header.Del(header_to_remove)
+	}
+
+	// remove Content-Length from all listing requests
+	if r.Method == "GET" || r.Method == "HEAD" || r.Method == "DELETE" {
+		r.Header.Del("Content-Length")
+		TraceLogger.Printf("Removed Content-Length header from %s request", r.Method)
 	}
 
 	TraceLogger.Println("Where:", "before adding headers")
@@ -511,7 +519,7 @@ func connectResponseOK(w http.ResponseWriter, format string, args ...interface{}
 	// return 200 OK, if whis is CONNECT method (for https and proxy authentication)
 	// we do not support auth yet
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, format, args...)
+	_, _ = fmt.Fprintf(w, format, args...)
 	InfoLogger.Printf(format, args...)
 }
 
@@ -519,7 +527,7 @@ func failRequest(w http.ResponseWriter, statusCode int, format string, args ...i
 	const ErrorFooter = "\n\nGreetings, the S3Proxy\n"
 
 	w.WriteHeader(statusCode)
-	fmt.Fprintf(w, format+ErrorFooter, args...)
+	_, _ = fmt.Fprintf(w, format+ErrorFooter, args...)
 	ErrorLogger.Printf(format, args...)
 }
 
@@ -563,7 +571,11 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		InfoLogger.Printf("Handling request for configured bucket: %s", info.Name)
 	}
 
-	defer r.Body.Close() // force to close body if error happens
+	defer func() {
+		if closeErr := r.Body.Close(); closeErr != nil {
+			ErrorLogger.Printf("Error closing request body: %v", closeErr)
+		}
+	}() // force to close body if error happens
 
 	// buffer for original request body
 	var originalBodyData bytes.Buffer
@@ -723,7 +735,36 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		TraceLogger.Printf("BEFORE client.Do: URL=%s, Method=%s",
 			innerRequest.URL.String(), innerRequest.Method)
 
+		// DEBUG innerRequest before send
+		TraceLogger.Printf("INNER REQUEST BEFORE SEND:")
+		TraceLogger.Printf("  Method: %s", innerRequest.Method)
+		TraceLogger.Printf("  URL: %s", innerRequest.URL.String())
+		TraceLogger.Printf("  Content-Length: %d", innerRequest.ContentLength)
+
+		// all headers
+		TraceLogger.Printf("  Headers:")
+		for k, v := range innerRequest.Header {
+			TraceLogger.Printf("    %s: %v", k, v)
+		}
+
+		// body
+		if innerRequest.Body != nil {
+			bodyBytes, err := io.ReadAll(innerRequest.Body)
+			if err != nil {
+				TraceLogger.Printf("  Body: [error reading: %v]", err)
+				innerRequest.Body = io.NopCloser(bytes.NewBuffer(nil))
+			} else {
+				bodyStr := string(bodyBytes)
+				if len(bodyStr) > 4096 {
+					bodyStr = bodyStr[:4096] + "... [truncated]"
+				}
+				TraceLogger.Printf("  Body (%d bytes): %s", len(bodyBytes), bodyStr)
+				innerRequest.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			}
+		}
+
 		innerResponse, err = h.client.Do(innerRequest)
+
 		// check response
 		if err != nil {
 			InfoLogger.Printf("ERROR IN client.Do: %v", err)
@@ -732,7 +773,26 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		TraceLogger.Println("Where:", "after h.client.Do(innerRequest)")
+		TraceLogger.Println("Where:", "AFTER h.client.Do(innerRequest)")
+
+		// DEBUG inner response from s3 server
+		TraceLogger.Printf("INNER RESPONSE: err=%v", err)
+		if innerResponse.Body != nil {
+			bodyBytes, err := io.ReadAll(innerResponse.Body)
+			if err != nil {
+				TraceLogger.Printf("  Body: [error reading: %v]", err)
+				innerResponse.Body = io.NopCloser(bytes.NewBuffer(nil))
+			} else {
+				bodyStr := string(bodyBytes)
+				if len(bodyStr) > 4096 {
+					bodyStr = bodyStr[:4096] + "... [truncated]"
+				}
+				TraceLogger.Printf("  Body (%d bytes): %s", len(bodyBytes), bodyStr)
+				innerResponse.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			}
+		} else {
+			TraceLogger.Printf("  Response: NIL")
+		}
 
 		if err != nil {
 			failRequest(w, http.StatusInternalServerError, "Error while serving the request: %s", err)
@@ -741,7 +801,9 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		defer func() {
 			if innerResponse != nil && innerResponse.Body != nil {
-				innerResponse.Body.Close()
+				if closeErr := innerResponse.Body.Close(); closeErr != nil {
+					ErrorLogger.Printf("Error closing inner response body: %v", closeErr)
+				}
 			}
 		}()
 

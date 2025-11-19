@@ -31,29 +31,29 @@ type Config struct {
 
 func parseConfig(filename string) (*Config, error) {
 	fd, err := os.Open(filename)
-
 	if err != nil {
 		return nil, err
 	}
-
-	defer fd.Close()
+	defer func() {
+		if closeErr := fd.Close(); closeErr != nil {
+			ErrorLogger.Printf("Error closing config file: %v", closeErr)
+		}
+	}()
 
 	decoder := json.NewDecoder(fd)
-
 	c := &Config{}
 
 	err = decoder.Decode(c)
-
 	if err != nil {
 		return nil, err
 	}
 
 	if c.Server.Address == "" {
-		return nil, fmt.Errorf("Missing config parameter Server.Address")
+		return nil, fmt.Errorf("missing config parameter Server.Address")
 	}
 
 	if c.Server.Port <= 0 {
-		return nil, fmt.Errorf("Missing or invalid config parameter Server.Port")
+		return nil, fmt.Errorf("missing or invalid config parameter Server.Port")
 	}
 
 	if c.Server.AwsDomain == "" {
@@ -63,7 +63,7 @@ func parseConfig(filename string) (*Config, error) {
 	for name, config := range c.Buckets {
 		// Empty AccessKeyId means "use instance profile"
 		if config.AccessKeyId != "" && config.SecretAccessKey == "" {
-			return nil, fmt.Errorf("Missing config parameter SecretAccessKey for bucket '%s'", name)
+			return nil, fmt.Errorf("missing config parameter SecretAccessKey for bucket '%s'", name)
 		}
 
 		if config.RetryCount < 0 {
@@ -81,9 +81,8 @@ func parseConfig(filename string) (*Config, error) {
 		if config.Protocol == "" {
 			config.Protocol = "https"
 		} else if config.Protocol != "" && (config.Protocol != "http" && config.Protocol != "https") {
-			return nil, fmt.Errorf("Wrong config parameter Protocol for bucket '%s'. Must be http or https", name)
+			return nil, fmt.Errorf("wrong config parameter Protocol for bucket '%s'. Must be http or https", name)
 		}
-
 	}
 
 	return c, nil

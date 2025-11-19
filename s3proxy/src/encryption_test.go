@@ -58,7 +58,9 @@ func TestEncryption(t *testing.T) {
 			t.Fatalf("Error while encrypting data: %s", err)
 		}
 
-		encReader.Close()
+		if err := encReader.Close(); err != nil {
+			t.Fatalf("Error while closing encryption reader: %s", err)
+		}
 
 		if i > 0 && byteArrayEquals(encryptedPayloads[i-1], encryptedPayloads[i]) {
 			t.Fatalf("Two identical encrypted payloads for two different encryption rounds")
@@ -77,7 +79,9 @@ func TestEncryption(t *testing.T) {
 			t.Fatalf("Error while decrypting data: %s", err)
 		}
 
-		decReader.Close()
+		if err := decReader.Close(); err != nil {
+			t.Fatalf("Error while closing decryption reader: %s", err)
+		}
 
 		if string(decryptedPayload) != payload {
 			t.Fatalf("Decrypted payload does not match original (decrypted: '%s' original: '%s')", string(decryptedPayload), payload)
@@ -96,7 +100,9 @@ func TestEncryption(t *testing.T) {
 			t.Fatalf("Error while decrypting data: %s", err)
 		}
 
-		decReader.Close()
+		if err := decReader.Close(); err != nil {
+			t.Fatalf("Error while closing decryption reader: %s", err)
+		}
 
 		if string(decryptedPayload) == payload {
 			t.Fatalf("Getting correct payload while decrypting with wrong key!")

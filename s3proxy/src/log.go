@@ -24,8 +24,8 @@ func init() {
 }
 
 func enableDebugMode(debugLevel string) {
-	var infoOutput io.Writer = io.Discard
-	var traceOutput io.Writer = io.Discard
+	var infoOutput = io.Discard
+	var traceOutput = io.Discard
 
 	switch debugLevel {
 	case "true":

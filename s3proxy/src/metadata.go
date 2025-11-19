@@ -19,22 +19,18 @@ type ObjectMetadata struct {
 func SerializeObjectMetadata(m *ObjectMetadata, w io.Writer) error {
 	TraceLogger.Println("Where:", "SerializeObjectMetadata")
 	_, err := w.Write([]byte{S3ProxyMetadataVersion})
-
 	if err != nil {
 		return err
 	}
 
 	encodedSize := make([]byte, 8)
 	n := binary.PutUvarint(encodedSize, m.Size)
-
 	_, err = w.Write(encodedSize[0:n])
-
 	if err != nil {
 		return err
 	}
 
 	_, err = io.Copy(w, strings.NewReader(m.Etag))
-
 	TraceLogger.Println("Where:", "end SerializeObjectMetadata")
 
 	return err
@@ -45,31 +41,28 @@ func UnserializeObjectMetadata(r io.Reader) (*ObjectMetadata, error) {
 	bufReader := bufio.NewReader(r)
 
 	metadataVersion := make([]byte, 1)
-
 	if n, err := bufReader.Read(metadataVersion); err != nil || n != len(metadataVersion) {
-		return nil, fmt.Errorf("Cannot read metadata version: %s", err)
+		return nil, fmt.Errorf("cannot read metadata version: %s", err)
 	}
 
 	if metadataVersion[0] != S3ProxyMetadataVersion {
-		return nil, fmt.Errorf("Invalid metadata version: %x", metadataVersion)
+		return nil, fmt.Errorf("invalid metadata version: %x", metadataVersion)
 	}
 
 	size, err := binary.ReadUvarint(bufReader)
-
 	if err != nil {
 		return nil, err
 	}
 
 	etag, err := io.ReadAll(bufReader)
-
 	if err != nil {
 		return nil, err
 	}
 
 	TraceLogger.Println("Where:", "end UnserializeObjectMetadata")
 	return &ObjectMetadata{
-		size,
-		string(etag),
+		Size: size,
+		Etag: string(etag),
 	}, nil
 }
 
@@ -80,27 +73,22 @@ func (h *ProxyHandler) UpdateObjectMetadata(objectUrl *url.URL, metadata *Object
 	}
 
 	serializedMetadata := bytes.NewBuffer(nil)
-
 	err := SerializeObjectMetadata(metadata, serializedMetadata)
-
 	if err != nil {
 		return err
 	}
 
 	encReader, _, err := SetupWriteEncryption(bytes.NewReader(serializedMetadata.Bytes()), info)
-
 	if err != nil {
 		return err
 	}
 
 	encryptedMetadata, err := io.ReadAll(encReader)
-
 	if err != nil {
 		return err
 	}
 
 	requestUrl := *objectUrl
-
 	var objectPath string
 
 	if info.VirtualHost {
@@ -110,7 +98,6 @@ func (h *ProxyHandler) UpdateObjectMetadata(objectUrl *url.URL, metadata *Object
 	}
 
 	metadataRequest, err := http.NewRequest("PUT", objectUrl.String(), nil)
-
 	if err != nil {
 		return err
 	}
@@ -123,30 +110,31 @@ func (h *ProxyHandler) UpdateObjectMetadata(objectUrl *url.URL, metadata *Object
 		if strings.HasPrefix(strings.ToLower(k), "x-amz-meta-") || k == S3ProxyMetadataHeader {
 			continue
 		}
-
 		metadataRequest.Header[k] = vs
 	}
 
 	// metadata has empty Body (we do not overwrite file in s3). Pass it to signature with empty Body
 	metadataRequest.Header.Set("Content-Length", "0")
 	err = h.SignRequestV4(metadataRequest, info, []byte(""))
-
 	if err != nil {
 		return err
 	}
 
 	metadataResponse, err := h.client.Do(metadataRequest)
-
 	TraceLogger.Println("Where:", "end UpdateObjectMetadata")
 	if err != nil {
 		return err
 	}
 
-	if metadataResponse.StatusCode != http.StatusOK {
-		return fmt.Errorf("Unexpected HTTP status: %s", metadataResponse.Status)
-	}
+	defer func() {
+		if closeErr := metadataResponse.Body.Close(); closeErr != nil {
+			ErrorLogger.Printf("Error closing metadata response body: %v", closeErr)
+		}
+	}()
 
-	defer metadataResponse.Body.Close()
+	if metadataResponse.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected HTTP status: %s", metadataResponse.Status)
+	}
 
 	return nil
 }
