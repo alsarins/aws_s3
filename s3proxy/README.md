@@ -11,7 +11,7 @@
   - Elasticsearch: tune "chunk_size" + "buffer_size" for s3 repository (for example 300MB both), to make it send exactly one file in exactly one PUT request, without multiparts
   - s3cmd tool: enable_multipart = False 
 
-## How to [build and run](s3proxy/src/README.md) it
+## How to [build and run](src/README.md) it
 
 ## Notice
 You should take into account the following considerations:
