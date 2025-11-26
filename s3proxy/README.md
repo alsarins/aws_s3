@@ -1,5 +1,6 @@
 # s3proxy - http proxy with transparent encryption (for PUT/POST requests) and decryption (for GET/HEAD).
 
+## What is it:
 - Modified version of https://github.com/abustany/s3proxy
 - Created for elasticsearch backups with client side encryption in mind
 - No authentication implemented (yet)
@@ -10,7 +11,9 @@
   - Elasticsearch: tune "chunk_size" + "buffer_size" for s3 repository (for example 300MB both), to make it send exactly one file in exactly one PUT request, without multiparts
   - s3cmd tool: enable_multipart = False 
 
-## Notice:
+## How to [build and run](s3proxy/src/README.md) it
+
+## Notice
 You should take into account the following considerations:
 - by using proxy your upload speed may be 2-3 times slower than in case of direct s3 access. This is due to the fact, that proxy needs to read whole HTTP request, encrypt it (if enabled), create new HTTP request with encrypted body, sign new encrypted body with AWS signature V4, send new signed HTTP request to s3 server. All of this steps takes times, and time depend on size of HTTP rquest body and CPU resources. There are no big chances to parallelize steps or pipe HTTP requests to s3 server in one client session, due to nature of HTTP protocol behavior with encryption enabled. If you do not need encryption, your better to not use s3proxy and use direct connection to s3 server.
 - by using proxy to encrypt data, your should take into account, that memory and CPU requirements depend on HTTP request body size heavily. This is due to fact, that proxy needs to remain original HTTP body in memory and constructs internal copies of HTTP body (encrypted and signed with AWS signature for example) and hashing objects. In practice, if original HTTP request body is 150Mb, encrypting proxy may allocate up to 1Gb of additional memory for encrypting/decrypting/hashing/signing. Typical overhead is x3-x5 of original HTTP size.
